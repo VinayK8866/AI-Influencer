@@ -3,7 +3,10 @@ import json
 import google.generativeai as genai
 from dotenv import load_dotenv
 
+# Try to load .env from the current directory, or fallback to the parent dashboard directory
 load_dotenv()
+if not os.getenv("GEMINI_API_KEY"):
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 class AgencyCOO:
     def __init__(self):

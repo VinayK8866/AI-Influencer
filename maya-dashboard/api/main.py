@@ -7,6 +7,11 @@ from social import MayaSocial
 from agency import AgencyCOO
 
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
+if not os.getenv("GEMINI_API_KEY"):
+    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 class MayaAutopilot:
     def __init__(self):

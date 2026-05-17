@@ -6,4 +6,4 @@
  * Restarting with stat
  * Debugger is active!
  * Debugger PIN: 123-396-847
-127.0.0.1 - - [17/May/2026 11:36:10] "[35m[1mGET /api/status HTTP/1.1[0m" 500 -
+127.0.0.1 - - [17/May/2026 13:25:38] "POST /api/generate-reel-storyboard HTTP/1.1" 200 -

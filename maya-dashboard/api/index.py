@@ -42,6 +42,8 @@ def generate_reel_storyboard():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+import traceback
+
 @app.route('/api/trigger-cycle', methods=['POST'])
 def trigger_cycle():
     """Triggers a full run of the autopilot."""
@@ -61,7 +63,9 @@ def trigger_cycle():
             "message": f"Successfully completed {post_type} cycle."
         }), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_trace = traceback.format_exc()
+        print(f"CRITICAL ERROR in /api/trigger-cycle:\n{error_trace}")
+        return jsonify({"error": str(e), "trace": error_trace}), 500
 
 # Vercel requires the app variable to be exposed
 if __name__ == '__main__':
