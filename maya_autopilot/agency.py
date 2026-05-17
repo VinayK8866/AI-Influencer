@@ -80,12 +80,15 @@ class AgencyCOO:
         # 4. THE MANAGER
         print(">> [Manager] Preparing assets and SEO metadata...")
         manager_role = "You are the Operations & Content Publisher. Handle asset management, highly optimized SEO captions, and strategic alt-text for discovery."
-        manager_task = f"Based on this finalized storyboard:\n{storyboard}\n\nGenerate the Asset Requirements list for the creator. Then, draft a highly optimized SEO caption and strategic alt-text for Instagram. Remember, there is NO audio or text in the video, so metadata is critical."
+        manager_task = f"Based on this finalized storyboard:\n{storyboard}\n\nGenerate the Asset Requirements list for the creator. Then, draft a highly optimized SEO caption and strategic alt-text for Instagram. Remember, there is NO audio or text in the video, so metadata is critical. Start the caption with 'CAPTION: ' so it can be parsed."
         final_assets = self.call_agent(manager_role, manager_task)
         print(f"\n[Deliverable: Asset & Metadata Package]\n{final_assets}\n")
 
         print("--- [COO] Reel Workflow Complete ---")
-        return final_assets
+        return {
+            "storyboard": storyboard,
+            "metadata": final_assets
+        }
 
 if __name__ == "__main__":
     coo = AgencyCOO()

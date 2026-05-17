@@ -8,21 +8,100 @@ load_dotenv()
 
 class MayaMedia:
     def __init__(self):
-        self.hf_api_key = os.getenv("HF_API_KEY")
-        if not self.hf_api_key:
-            raise ValueError("HF_API_KEY not found in environment variables.")
+        self.muapi_api_key = os.getenv("MUAPI_API_KEY")
 
-        # Using a free high-quality model from Hugging Face for image generation
-        # e.g., Stable Diffusion XL
-        self.api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
-        self.headers = {"Authorization": f"Bearer {self.hf_api_key}"}
+        # We now prefer Muapi.ai for high-fidelity video/image generation, keeping HF as fallback
+        if not self.muapi_api_key:
+            print("Warning: MUAPI_API_KEY not found, falling back to legacy HF pipeline if available.")
+            self.api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+            self.headers = {"Authorization": f"Bearer {os.getenv('HF_API_KEY')}"}
+        else:
+            self.api_url = "https://api.muapi.ai/api/v1"
+            self.headers = {
+                "x-api-key": self.muapi_api_key,
+                "Content-Type": "application/json"
+            }
+
+    def generate_video(self, prompt, output_path="output.mp4"):
+        """
+        Uses Muapi's async polling architecture to generate a high-quality video (e.g., using Seedance).
+        """
+        if not self.muapi_api_key:
+            raise Exception("Cannot generate true video without MUAPI_API_KEY.")
+
+        import time
+        print(f"\n[Muapi] Requesting Video Generation. Prompt: {prompt[:100]}...")
+
+        # Step 1: Submit the job to a text-to-video endpoint (e.g. Seedance 2.0)
+        endpoint = f"{self.api_url}/seedance-2.0"
+        payload = {
+            "prompt": prompt,
+            "duration": 5,
+            "aspect_ratio": "9:16", # Perfect for Instagram Reels
+            "quality": "high"
+        }
+
+        submit_res = requests.post(endpoint, headers=self.headers, json=payload)
+
+        if submit_res.status_code != 200 and submit_res.status_code != 202:
+            raise Exception(f"Failed to submit video job: {submit_res.status_code} - {submit_res.text}")
+
+        data = submit_res.json()
+        request_id = data.get("request_id")
+
+        if not request_id:
+            raise Exception("No request_id returned from Muapi.")
+
+        print(f"[Muapi] Job submitted successfully. Request ID: {request_id}")
+
+        # Step 2: Poll for completion
+        poll_endpoint = f"{self.api_url}/predictions/{request_id}/result"
+
+        max_attempts = 60 # Poll for up to 10 minutes (10s intervals)
+        for attempt in range(max_attempts):
+            time.sleep(10)
+            print(f"[Muapi] Polling for video completion... (Attempt {attempt+1}/{max_attempts})")
+
+            poll_res = requests.get(poll_endpoint, headers=self.headers)
+            if poll_res.status_code != 200:
+                continue
+
+            poll_data = poll_res.json()
+            status = poll_data.get("status")
+
+            if status == "completed":
+                video_url = poll_data.get("output_url") or poll_data.get("video_url")
+                if not video_url:
+                    raise Exception("Job completed but no video URL found in response.")
+
+                print(f"[Muapi] Video generation complete! Downloading from {video_url}...")
+
+                # Download the video file
+                video_data = requests.get(video_url)
+                with open(output_path, "wb") as f:
+                    f.write(video_data.content)
+
+                print(f"[Muapi] Video saved to {output_path}")
+                return output_path
+
+            elif status in ["failed", "error"]:
+                raise Exception(f"Muapi video generation failed: {poll_data}")
+
+        raise Exception("Muapi video generation timed out.")
 
     def generate_image(self, prompt, output_path="output.jpg"):
         """
-        Calls Hugging Face Inference API to generate an image based on the prompt.
+        Calls Muapi (or fallback HF) to generate an image based on the prompt.
         """
         import time
         print(f"Generating image with prompt: {prompt}")
+
+        # For images, we fallback to Hugging Face as it offers synchronous image endpoints,
+        # but we must ensure the key exists to avoid crashing.
+        hf_key = os.getenv("HF_API_KEY")
+        if not hf_key:
+            raise Exception("Cannot generate fallback image. HF_API_KEY is missing from environment variables.")
+
         payload = {
             "inputs": prompt,
             "parameters": {
@@ -34,7 +113,9 @@ class MayaMedia:
 
         max_retries = 3
         for attempt in range(max_retries):
-            response = requests.post(self.api_url, headers=self.headers, json=payload)
+            response = requests.post("https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+                                     headers={"Authorization": f"Bearer {hf_key}"},
+                                     json=payload)
 
             if response.status_code == 200:
                 image = Image.open(io.BytesIO(response.content))
