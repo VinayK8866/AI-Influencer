@@ -71,15 +71,21 @@ class MayaAutopilot:
 if __name__ == "__main__":
     autopilot = MayaAutopilot()
 
-    # Example usage: Run a single cycle immediately
-    # Note: In a production environment, you might use 'schedule' or 'cron'
-    # to run `autopilot.run_cycle()` at specific times.
+    print("Welcome to Maya Rossi's True Autopilot.")
+    print("Checking environment variables and initiating cycle...")
 
-    print("Welcome to Maya Rossi's Autopilot.")
-    print("Make sure you have populated .env with your GEMINI, HUGGING FACE, and INSTAGRAM keys.")
+    # Choose randomly between a photo and a reel for variety
+    post_choice = random.choice(["photo", "photo", "reel"])
 
-    # Uncomment to run a test cycle:
-    # try:
-    #     autopilot.run_cycle(post_type="photo")
-    # except Exception as e:
-    #     print(f"Autopilot encountered an error: {e}")
+    try:
+        # Occasionally travel to keep the content dynamic
+        if random.random() < 0.2: # 20% chance to travel
+            autopilot.travel()
+
+        autopilot.run_cycle(post_type=post_choice)
+    except Exception as e:
+        print(f"Autopilot encountered a critical error during execution: {e}")
+        # In a CI/CD environment like GitHub actions, we want it to exit with an error code
+        # so you get an email notification if it fails.
+        import sys
+        sys.exit(1)
