@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.env
+ig_session.json
+maya_temp.jpg
+maya_temp.mp4
+output.jpg
+output.mp4
