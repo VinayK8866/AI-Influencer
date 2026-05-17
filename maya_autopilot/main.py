@@ -53,10 +53,27 @@ class MayaAutopilot:
         print(f"Caption Generated: {post_data['caption'][:50]}...")
         print(f"Viral Hook: {post_data['viral_hook_text']}")
 
-        # 2. MEDIA: Generate Image
+        # 2. MEDIA: Generate Image with Verification Loop
         print("\n[2/4] Media generating visual assets...")
         image_path = "maya_temp.jpg"
-        self.media.generate_image(post_data["image_prompt"], output_path=image_path)
+
+        max_retries = 3
+        image_verified = False
+
+        for attempt in range(1, max_retries + 1):
+            print(f"--- Generation Attempt {attempt}/{max_retries} ---")
+            self.media.generate_image(post_data["image_prompt"], output_path=image_path)
+
+            # Verify the image quality with the Brain
+            if self.brain.verify_image(image_path):
+                image_verified = True
+                break
+            else:
+                print("Discarding image and retrying...")
+
+        if not image_verified:
+            print("Warning: Max retries reached. Proceeding with the final generated image anyway.")
+
 
         # Add the Viral Text Overlay
         self.media.add_viral_text_to_image(image_path, post_data["viral_hook_text"])

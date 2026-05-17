@@ -21,6 +21,7 @@ class MayaMedia:
         """
         Calls Hugging Face Inference API to generate an image based on the prompt.
         """
+        import time
         print(f"Generating image with prompt: {prompt}")
         payload = {
             "inputs": prompt,
@@ -31,15 +32,22 @@ class MayaMedia:
             }
         }
 
-        response = requests.post(self.api_url, headers=self.headers, json=payload)
+        max_retries = 3
+        for attempt in range(max_retries):
+            response = requests.post(self.api_url, headers=self.headers, json=payload)
 
-        if response.status_code == 200:
-            image = Image.open(io.BytesIO(response.content))
-            image.save(output_path)
-            print(f"Image successfully saved to {output_path}")
-            return output_path
-        else:
-            raise Exception(f"Failed to generate image: {response.status_code} - {response.text}")
+            if response.status_code == 200:
+                image = Image.open(io.BytesIO(response.content))
+                image.save(output_path)
+                print(f"Image successfully saved to {output_path}")
+                return output_path
+            elif response.status_code == 503:
+                print(f"Model is loading/unavailable (Attempt {attempt+1}/{max_retries}). Waiting 20 seconds...")
+                time.sleep(20)
+            else:
+                raise Exception(f"Failed to generate image: {response.status_code} - {response.text}")
+
+        raise Exception(f"Failed to generate image after {max_retries} retries: Model failed to wake up.")
 
     def add_viral_text_to_image(self, image_path, text):
         """
@@ -49,8 +57,12 @@ class MayaMedia:
         import textwrap
 
         print(f"Adding viral text overlay to {image_path}")
-        image = Image.open(image_path)
-        draw = ImageDraw.Draw(image)
+        # Convert base image to RGBA to support transparency
+        image = Image.open(image_path).convert("RGBA")
+
+        # Create a blank transparent image for the overlay
+        overlay = Image.new('RGBA', image.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(overlay)
 
         # We wrap the text so it doesn't run off the edges
         # Assuming typical SDXL resolution of 1024x1024
@@ -87,18 +99,21 @@ class MayaMedia:
         x = (img_width - text_width) / 2
         y = img_height * 0.4
 
-        # Draw background rectangle
+        # Draw background rectangle on the transparent overlay
         padding = 20
         draw.rectangle(
             [(x - padding, y - padding), (x + text_width + padding, y + text_height + padding)],
             fill=(0, 0, 0, 160)
         )
 
-        # Draw text
+        # Draw text on the transparent overlay
         draw.multiline_text((x, y), wrapped_text, font=font, fill=(255, 255, 255), align="center")
 
-        # Overwrite the original image
-        image.save(image_path)
+        # Composite the overlay onto the base image
+        out = Image.alpha_composite(image, overlay)
+        # Convert back to RGB for saving as JPEG
+        out = out.convert("RGB")
+        out.save(image_path)
         return image_path
 
     def create_reel_from_image(self, image_path, output_path="output.mp4"):

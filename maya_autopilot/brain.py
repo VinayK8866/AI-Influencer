@@ -76,6 +76,50 @@ class MayaBrain:
             print(f"Failed to parse JSON. Raw output:\n{text}")
             raise e
 
+    def verify_image(self, image_path):
+        """
+        Uses Gemini Vision to look at the generated image and decide if it looks like a real
+        photograph or if it has cartoon/3D/obvious AI flaws.
+        Returns True if the image is acceptable, False if it needs to be regenerated.
+        """
+        from PIL import Image
+        print("\n[Brain] Activating Vision Verification to check for AI artifacts...")
+
+        try:
+            img = Image.open(image_path)
+        except Exception as e:
+            print(f"[Brain Error] Could not load image for verification: {e}")
+            return False
+
+        verification_prompt = """
+        You are a strict photography art director.
+        Analyze this image. Does it look like a genuine, unedited, candid photograph taken with a real camera or smartphone?
+        Look closely for:
+        1. Cartoonish shading or 3D render aesthetics (like a video game).
+        2. "AI Perfect" plastic skin.
+        3. Severely deformed hands, extra limbs, or melting background details.
+
+        If it looks like a real photo, respond ONLY with "PASS".
+        If it looks like a cartoon, a 3D render, or has severe AI deformities, respond ONLY with "FAIL".
+        """
+
+        try:
+            # We use gemini-1.5-flash as it supports multimodal vision out of the box
+            response = self.model.generate_content([verification_prompt, img])
+            verdict = response.text.strip().upper()
+
+            if "PASS" in verdict:
+                print("[Brain] Verdict: PASS - The image looks photorealistic.")
+                return True
+            else:
+                print(f"[Brain] Verdict: FAIL - The image looks artificial or cartoonish. (Model Output: {verdict})")
+                return False
+
+        except Exception as e:
+            print(f"[Brain Error] Vision verification failed (API issue?): {e}")
+            # If the API fails for some reason, we assume True to keep the pipeline moving
+            return True
+
 if __name__ == "__main__":
     # Test the Brain
     brain = MayaBrain()
