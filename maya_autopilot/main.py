@@ -5,6 +5,8 @@ from brain import MayaBrain
 from media import MayaMedia
 from social import MayaSocial
 
+import json
+
 class MayaAutopilot:
     def __init__(self):
         print("Initializing Maya Autopilot...")
@@ -12,15 +14,35 @@ class MayaAutopilot:
         self.media = MayaMedia()
         self.social = MayaSocial()
 
-        # Internal state to track location, to prevent "teleporting"
-        self.current_location = "Mumbai"
+        self.state_file = "state.json"
         self.locations = ["Mumbai", "Milan", "Tuscany", "Goa"]
+
+        # Load state from file if it exists, otherwise default
+        self.state = {"current_location": "Mumbai"}
+        self._load_state()
+
+    def _load_state(self):
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, 'r') as f:
+                    self.state = json.load(f)
+                print(f"Loaded previous state. Location: {self.state.get('current_location')}")
+            except Exception as e:
+                print(f"Error loading state: {e}")
+
+    def _save_state(self):
+        try:
+            with open(self.state_file, 'w') as f:
+                json.dump(self.state, f)
+            print("Successfully saved state.")
+        except Exception as e:
+            print(f"Error saving state: {e}")
 
     def run_cycle(self, post_type="photo", force_location=None):
         """
         Runs one complete generation and posting cycle.
         """
-        location = force_location if force_location else self.current_location
+        location = force_location if force_location else self.state.get("current_location", "Mumbai")
         print(f"\n--- Starting Autopilot Cycle ---")
         print(f"Location: {location} | Type: {post_type}")
 
@@ -29,11 +51,15 @@ class MayaAutopilot:
         post_data = self.brain.generate_post(location=location, post_type=post_type)
         print(f"Prompt Generated: {post_data['image_prompt'][:100]}...")
         print(f"Caption Generated: {post_data['caption'][:50]}...")
+        print(f"Viral Hook: {post_data['viral_hook_text']}")
 
         # 2. MEDIA: Generate Image
         print("\n[2/4] Media generating visual assets...")
         image_path = "maya_temp.jpg"
         self.media.generate_image(post_data["image_prompt"], output_path=image_path)
+
+        # Add the Viral Text Overlay
+        self.media.add_viral_text_to_image(image_path, post_data["viral_hook_text"])
 
         # 3. PREPARE MEDIA FOR UPLOAD
         upload_path = image_path
@@ -59,14 +85,18 @@ class MayaAutopilot:
         if os.path.exists("maya_temp.mp4"):
             os.remove("maya_temp.mp4")
 
+        # Save state at the very end
+        self._save_state()
+
         print("--- Autopilot Cycle Complete ---\n")
 
     def travel(self):
         """Randomly decides to travel to a new location."""
-        new_location = random.choice([loc for loc in self.locations if loc != self.current_location])
-        print(f"Maya is traveling from {self.current_location} to {new_location} ✈️")
-        self.current_location = new_location
-        # A real implementation would force the next post to be an airport/travel post
+        current = self.state.get("current_location", "Mumbai")
+        new_location = random.choice([loc for loc in self.locations if loc != current])
+        print(f"Maya is traveling from {current} to {new_location} ✈️")
+        self.state["current_location"] = new_location
+        self._save_state()
 
 if __name__ == "__main__":
     autopilot = MayaAutopilot()

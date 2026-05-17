@@ -25,7 +25,7 @@ class MayaMedia:
         payload = {
             "inputs": prompt,
             "parameters": {
-                "negative_prompt": "ugly, blurry, deformed, poorly drawn, AI-perfect, weird hands, extra limbs",
+                "negative_prompt": "ugly, blurry, deformed, poorly drawn, AI-perfect, weird hands, extra limbs, cartoon, 3d render, artificial lighting",
                 "num_inference_steps": 50,
                 "guidance_scale": 7.5
             }
@@ -40,6 +40,66 @@ class MayaMedia:
             return output_path
         else:
             raise Exception(f"Failed to generate image: {response.status_code} - {response.text}")
+
+    def add_viral_text_to_image(self, image_path, text):
+        """
+        Mimics Instagram's native text overlays by drawing the viral hook directly onto the image.
+        """
+        from PIL import ImageDraw, ImageFont
+        import textwrap
+
+        print(f"Adding viral text overlay to {image_path}")
+        image = Image.open(image_path)
+        draw = ImageDraw.Draw(image)
+
+        # We wrap the text so it doesn't run off the edges
+        # Assuming typical SDXL resolution of 1024x1024
+        wrapped_text = textwrap.fill(text, width=30)
+
+        # Ensure a readable font exists, download Roboto if necessary
+        font_path = "Roboto-Bold.ttf"
+        if not os.path.exists(font_path):
+            import urllib.request
+            print("Downloading Roboto font for text overlays...")
+            try:
+                urllib.request.urlretrieve(
+                    "https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf",
+                    font_path
+                )
+            except Exception as e:
+                print(f"Failed to download font: {e}")
+
+        try:
+            font = ImageFont.truetype(font_path, 45)
+        except IOError:
+            # Absolute fallback if download fails
+            print("Warning: Could not load TTF font, falling back to default.")
+            font = ImageFont.load_default()
+
+        # Add a semi-transparent black background behind the text for readability
+        # Calculate bounding box using textbbox
+        bbox = draw.textbbox((0, 0), wrapped_text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+
+        # Center horizontally, place somewhat centrally/lower-middle vertically
+        img_width, img_height = image.size
+        x = (img_width - text_width) / 2
+        y = img_height * 0.4
+
+        # Draw background rectangle
+        padding = 20
+        draw.rectangle(
+            [(x - padding, y - padding), (x + text_width + padding, y + text_height + padding)],
+            fill=(0, 0, 0, 160)
+        )
+
+        # Draw text
+        draw.multiline_text((x, y), wrapped_text, font=font, fill=(255, 255, 255), align="center")
+
+        # Overwrite the original image
+        image.save(image_path)
+        return image_path
 
     def create_reel_from_image(self, image_path, output_path="output.mp4"):
         """
