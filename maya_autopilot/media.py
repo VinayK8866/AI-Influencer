@@ -32,19 +32,39 @@ class MayaMedia:
         import time
         print(f"\n[Muapi] Requesting Video Generation. Prompt: {prompt[:100]}...")
 
-        # Step 1: Submit the job to a text-to-video endpoint (e.g. Seedance 2.0)
-        endpoint = f"{self.api_url}/seedance-2.0"
-        payload = {
-            "prompt": prompt,
-            "duration": 5,
-            "aspect_ratio": "9:16", # Perfect for Instagram Reels
-            "quality": "high"
-        }
+        # For multi-model aggregators like Muapi, the standard generic endpoint is often /generate
+        # We pass the specific model name in the payload body.
+        endpoint = f"{self.api_url}/generate"
 
-        submit_res = requests.post(endpoint, headers=self.headers, json=payload)
+        models_to_try = ["seedance-2.0", "kling-v3", "runway"]
+        submit_res = None
 
-        if submit_res.status_code != 200 and submit_res.status_code != 202:
-            raise Exception(f"Failed to submit video job: {submit_res.status_code} - {submit_res.text}")
+        for model in models_to_try:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "duration": 5,
+                "aspect_ratio": "9:16" # Perfect for Instagram Reels
+            }
+
+            print(f"[Muapi] Trying model '{model}' via generic endpoint...")
+            submit_res = requests.post(endpoint, headers=self.headers, json=payload)
+
+            # Fallback: if the generic endpoint 404s, try the direct path approach as a last resort
+            if submit_res.status_code == 404:
+                direct_endpoint = f"{self.api_url}/{model}"
+                print(f"[Muapi] Generic endpoint 404. Trying direct path: {direct_endpoint}...")
+                submit_res = requests.post(direct_endpoint, headers=self.headers, json=payload)
+
+            if submit_res.status_code in [200, 202]:
+                print(f"[Muapi] Successfully submitted job to {model}.")
+                break
+            else:
+                print(f"[Muapi] Model {model} failed: {submit_res.status_code} - {submit_res.text}")
+                submit_res = None
+
+        if not submit_res:
+            raise Exception("Failed to submit video job. All attempted Muapi models and paths returned errors or 404s.")
 
         data = submit_res.json()
         request_id = data.get("request_id")
