@@ -112,14 +112,19 @@ class MayaAutopilot:
                 caption_to_post = f"Maya's Crew ✨ Location: {location}. #VirtualInfluencer\n(Scripted by Maya's Elite AI Agency)"
 
         # 3. SOCIAL: Post to Instagram
-        print("\n[3/4] Logging into Instagram...")
-        self.social.login()
+        if os.getenv("DRY_RUN", "false").lower() == "true":
+            print("\n[3/4] DRY_RUN is active. Skipping Instagram Login...")
+            print(f"\n[4/4] DRY_RUN is active. Skipping Publishing {post_type}...")
+            print(f"Would have posted:\nCaption: {caption_to_post}\nMedia: {upload_path}")
+        else:
+            print("\n[3/4] Logging into Instagram...")
+            self.social.login()
 
-        print(f"\n[4/4] Publishing {post_type}...")
-        if post_type == "photo":
-            self.social.post_photo(upload_path, caption_to_post)
-        elif post_type == "reel":
-            self.social.post_reel(upload_path, caption_to_post)
+            print(f"\n[4/4] Publishing {post_type}...")
+            if post_type == "photo":
+                self.social.post_photo(upload_path, caption_to_post)
+            elif post_type == "reel":
+                self.social.post_reel(upload_path, caption_to_post)
 
         # Cleanup temp files
         print("\nCleaning up temporary files...")
@@ -157,7 +162,9 @@ if __name__ == "__main__":
 
         autopilot.run_cycle(post_type=post_choice)
     except Exception as e:
-        print(f"Autopilot encountered a critical error during execution: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"CRITICAL ERROR in Autopilot Execution:\n{error_trace}")
         # In a CI/CD environment like GitHub actions, we want it to exit with an error code
         # so you get an email notification if it fails.
         import sys
