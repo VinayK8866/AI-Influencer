@@ -11,15 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Restore State Cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             maya_autopilot/state.json
@@ -45,9 +45,18 @@ jobs:
           cd maya_autopilot
           python main.py
 
+      - name: Check State Files
+        id: check_files
+        run: |
+          if [ -f maya_autopilot/state.json ] && [ -f maya_autopilot/ig_session.json ]; then
+            echo "files_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "files_exist=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Save State Cache
-        if: always()
-        uses: actions/cache/save@v3
+        if: always() && steps.check_files.outputs.files_exist == 'true'
+        uses: actions/cache/save@v4
         with:
           path: |
             maya_autopilot/state.json
