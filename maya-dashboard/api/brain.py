@@ -12,8 +12,7 @@ class MayaBrain:
             raise ValueError("GEMINI_API_KEY not found in environment variables.")
 
         genai.configure(api_key=self.api_key)
-        # Using Gemini 1.5 Pro or Flash. 1.5 Flash is great for text generation and speed.
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-3-flash-preview')
 
         self.system_prompt = """
         You are the Brain and Voice of Maya Rossi, a 23-year-old Virtual Influencer.

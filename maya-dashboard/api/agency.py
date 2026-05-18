@@ -14,11 +14,8 @@ class AgencyCOO:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not found in environment variables.")
 
-        if self.api_key != "dummy_key_for_test":
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-        else:
-            self.model = None
+        genai.configure(api_key=self.api_key)
+        self.model = genai.GenerativeModel('gemini-3-flash-preview')
 
         # Central memory for the agency
         self.style_bible = [
@@ -28,22 +25,8 @@ class AgencyCOO:
         ]
 
     def call_agent(self, role_prompt, task_prompt):
-        """Helper to call an individual agent. If API key is dummy, mock the response for testing."""
-        if self.api_key == "dummy_key_for_test":
-            if "Anthropologist" in role_prompt:
-                return "Visual Trend Directive:\nConcept: Match-Cut Architectural Transitions.\nColor Palette: Terra-cotta and deep emerald.\nHook: Sharp turn from a narrow cobbled street revealing a sweeping piazza."
-            elif "Creative Director" in role_prompt:
-                return "Storyboard:\nFrame 1 (0-1.5s): Quick pan up a 600-year-old column in Rome. High contrast.\nFrame 2 (1.5-3s): Match-cut to the model's structured blazer sleeve moving at the same speed.\nFrame 3 (3-5s): Slow-motion walking shot, no text.\nFrame 4 (5-7s): Camera pans down to the cobblestones, looping perfectly back to Frame 1."
-            elif "Quality Assurance" in role_prompt:
-                return "APPROVED"
-            elif "Operations" in role_prompt:
-                return "Asset Requirements: 4 clips total, 4K at 60fps.\nCaption: Rome isn't built in a day, but an outfit is. 🏛️✨\nAlt-text: Model in chic blazer walking in Rome piazza."
-
+        """Helper to call an individual agent."""
         system_instruction = f"{role_prompt}\n\nAgency Style Bible:\n" + "\n".join(self.style_bible)
-
-        if self.model is None:
-             raise ValueError("API key is invalid and mock routing failed.")
-
         response = self.model.generate_content([system_instruction, task_prompt])
         return response.text.strip()
 
