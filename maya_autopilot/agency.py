@@ -22,27 +22,45 @@ class AgencyCOO:
         ]
 
     def call_agent(self, role_prompt, task_prompt):
-        """Helper to call an individual agent with automatic retry and backoff on rate limits/quota limits."""
+        """Helper to call an individual agent with automatic retry and dynamic model fallback on quota limits."""
         import time
         system_instruction = f"{role_prompt}\n\nAgency Style Bible:\n" + "\n".join(self.style_bible)
 
-        max_retries = 6
-        base_delay = 5  # Start with 5s delay
+        models_to_try = [
+            'gemini-3-flash-preview',
+            'gemini-1.5-flash',
+            'gemini-1.5-pro'
+        ]
 
-        for attempt in range(max_retries):
+        last_error = None
+        for model_name in models_to_try:
+            print(f"[COO] Attempting agent call using model: {model_name}")
             try:
-                response = self.model.generate_content([system_instruction, task_prompt])
-                return response.text.strip()
-            except Exception as e:
-                err_str = str(e).lower()
-                is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
+                model = genai.GenerativeModel(model_name)
+                max_retries = 3
+                base_delay = 5
 
-                if is_rate_limit and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    print(f"\n[RATE LIMIT] Gemini API rate limit hit. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
-                    time.sleep(sleep_time)
-                else:
-                    raise e
+                for attempt in range(max_retries):
+                    try:
+                        response = model.generate_content([system_instruction, task_prompt])
+                        return response.text.strip()
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
+
+                        if is_rate_limit and attempt < max_retries - 1:
+                            sleep_time = base_delay * (2 ** attempt)
+                            print(f"\n[RATE LIMIT] Rate limit on {model_name}. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
+                            time.sleep(sleep_time)
+                        else:
+                            raise e
+            except Exception as e:
+                print(f"[COO WARNING] Model {model_name} failed: {e}")
+                last_error = e
+
+        if last_error:
+            raise last_error
+        raise Exception("All Gemini models failed to generate content.")
 
     def run_reel_workflow(self, concept):
         print(f"--- [COO] Initializing Ecosystem for Concept: {concept} ---\n")

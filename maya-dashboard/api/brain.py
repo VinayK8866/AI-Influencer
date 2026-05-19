@@ -41,24 +41,43 @@ class MayaBrain:
         """
 
     def generate_content_with_retry(self, contents):
-        """Helper to generate content from the model with automatic retry on rate limits/quota exhaustion."""
+        """Helper to generate content from the model with automatic retry and dynamic model fallback on quota limits."""
         import time
-        max_retries = 6
-        base_delay = 5  # Start with 5s delay
 
-        for attempt in range(max_retries):
+        models_to_try = [
+            'gemini-3-flash-preview',
+            'gemini-1.5-flash',
+            'gemini-1.5-pro'
+        ]
+
+        last_error = None
+        for model_name in models_to_try:
+            print(f"[Brain] Attempting generation using model: {model_name}")
             try:
-                return self.model.generate_content(contents)
-            except Exception as e:
-                err_str = str(e).lower()
-                is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
+                model = genai.GenerativeModel(model_name)
+                max_retries = 3
+                base_delay = 5
 
-                if is_rate_limit and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    print(f"\n[RATE LIMIT] Gemini API rate limit hit in Brain. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
-                    time.sleep(sleep_time)
-                else:
-                    raise e
+                for attempt in range(max_retries):
+                    try:
+                        return model.generate_content(contents)
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
+
+                        if is_rate_limit and attempt < max_retries - 1:
+                            sleep_time = base_delay * (2 ** attempt)
+                            print(f"\n[RATE LIMIT] Rate limit on {model_name}. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
+                            time.sleep(sleep_time)
+                        else:
+                            raise e
+            except Exception as e:
+                print(f"[Brain WARNING] Model {model_name} failed: {e}")
+                last_error = e
+
+        if last_error:
+            raise last_error
+        raise Exception("All Gemini models failed to generate content.")
 
     def generate_post(self, location="Mumbai", post_type="photo"):
         """
