@@ -40,6 +40,26 @@ class MayaBrain:
         Virality: Instagram loves relatable text overlays. We will generate a short, punchy, relatable "Viral Hook" text that will be written ON the video/photo.
         """
 
+    def generate_content_with_retry(self, contents):
+        """Helper to generate content from the model with automatic retry on rate limits/quota exhaustion."""
+        import time
+        max_retries = 6
+        base_delay = 5  # Start with 5s delay
+
+        for attempt in range(max_retries):
+            try:
+                return self.model.generate_content(contents)
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
+
+                if is_rate_limit and attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt)
+                    print(f"\n[RATE LIMIT] Gemini API rate limit hit in Brain. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(sleep_time)
+                else:
+                    raise e
+
     def generate_post(self, location="Mumbai", post_type="photo"):
         """
         Generates a post concept, image generation prompt, caption, and viral hook.
@@ -58,7 +78,7 @@ class MayaBrain:
         Output only valid JSON. Do not include markdown code blocks like ```json.
         """
 
-        response = self.model.generate_content([self.system_prompt, prompt])
+        response = self.generate_content_with_retry([self.system_prompt, prompt])
         text = response.text.strip()
 
         # Clean up if the model includes markdown code block markers
@@ -104,7 +124,7 @@ class MayaBrain:
 
         try:
             # We use gemini-1.5-flash as it supports multimodal vision out of the box
-            response = self.model.generate_content([verification_prompt, img])
+            response = self.generate_content_with_retry([verification_prompt, img])
             verdict = response.text.strip().upper()
 
             if "PASS" in verdict:
