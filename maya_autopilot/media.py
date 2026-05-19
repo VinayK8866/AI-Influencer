@@ -32,82 +32,88 @@ class MayaMedia:
         import time
         print(f"\n[Muapi] Requesting Video Generation. Prompt: {prompt[:100]}...")
 
-        # For multi-model aggregators like Muapi, the standard generic endpoint is often /generate
-        # We pass the specific model name in the payload body.
-        endpoint = f"{self.api_url}/generate"
+        # We will attempt multiple common video endpoints.
+        endpoints_to_try = [
+            f"{self.api_url}/kling-video",
+            f"{self.api_url}/seedance-video",
+            f"{self.api_url}/runway-gen3"
+        ]
 
-        models_to_try = ["seedance-2.0", "kling-v3", "runway"]
         submit_res = None
+        payload = {
+            "prompt": prompt,
+            "duration": 5,
+            "aspect_ratio": "9:16" # Perfect for Instagram Reels
+        }
 
-        for model in models_to_try:
-            payload = {
-                "model": model,
-                "prompt": prompt,
-                "duration": 5,
-                "aspect_ratio": "9:16" # Perfect for Instagram Reels
-            }
+        try:
+            for endpoint in endpoints_to_try:
+                print(f"[Muapi] Trying direct path: {endpoint}...")
+                submit_res = requests.post(endpoint, headers=self.headers, json=payload)
 
-            print(f"[Muapi] Trying model '{model}' via generic endpoint...")
-            submit_res = requests.post(endpoint, headers=self.headers, json=payload)
+                if submit_res.status_code in [200, 202]:
+                    print(f"[Muapi] Successfully submitted job to {endpoint}.")
+                    break
+                else:
+                    print(f"[Muapi] Endpoint failed: {submit_res.status_code} - {submit_res.text}")
+                    submit_res = None
 
-            # Fallback: if the generic endpoint 404s, try the direct path approach as a last resort
-            if submit_res.status_code == 404:
-                direct_endpoint = f"{self.api_url}/{model}"
-                print(f"[Muapi] Generic endpoint 404. Trying direct path: {direct_endpoint}...")
-                submit_res = requests.post(direct_endpoint, headers=self.headers, json=payload)
+            if not submit_res:
+                raise Exception("All attempted Muapi paths returned errors or 404s.")
 
-            if submit_res.status_code in [200, 202]:
-                print(f"[Muapi] Successfully submitted job to {model}.")
-                break
-            else:
-                print(f"[Muapi] Model {model} failed: {submit_res.status_code} - {submit_res.text}")
-                submit_res = None
+            data = submit_res.json()
+            request_id = data.get("request_id")
 
-        if not submit_res:
-            raise Exception("Failed to submit video job. All attempted Muapi models and paths returned errors or 404s.")
+            if not request_id:
+                raise Exception("No request_id returned from Muapi.")
 
-        data = submit_res.json()
-        request_id = data.get("request_id")
+            print(f"[Muapi] Job submitted successfully. Request ID: {request_id}")
 
-        if not request_id:
-            raise Exception("No request_id returned from Muapi.")
+            # Step 2: Poll for completion
+            poll_endpoint = f"{self.api_url}/predictions/{request_id}/result"
 
-        print(f"[Muapi] Job submitted successfully. Request ID: {request_id}")
+            max_attempts = 60 # Poll for up to 10 minutes (10s intervals)
+            for attempt in range(max_attempts):
+                time.sleep(10)
+                print(f"[Muapi] Polling for video completion... (Attempt {attempt+1}/{max_attempts})")
 
-        # Step 2: Poll for completion
-        poll_endpoint = f"{self.api_url}/predictions/{request_id}/result"
+                poll_res = requests.get(poll_endpoint, headers=self.headers)
+                if poll_res.status_code != 200:
+                    continue
 
-        max_attempts = 60 # Poll for up to 10 minutes (10s intervals)
-        for attempt in range(max_attempts):
-            time.sleep(10)
-            print(f"[Muapi] Polling for video completion... (Attempt {attempt+1}/{max_attempts})")
+                poll_data = poll_res.json()
+                status = poll_data.get("status")
 
-            poll_res = requests.get(poll_endpoint, headers=self.headers)
-            if poll_res.status_code != 200:
-                continue
+                if status == "completed":
+                    video_url = poll_data.get("output_url") or poll_data.get("video_url")
+                    if not video_url:
+                        raise Exception("Job completed but no video URL found in response.")
 
-            poll_data = poll_res.json()
-            status = poll_data.get("status")
+                    print(f"[Muapi] Video generation complete! Downloading from {video_url}...")
 
-            if status == "completed":
-                video_url = poll_data.get("output_url") or poll_data.get("video_url")
-                if not video_url:
-                    raise Exception("Job completed but no video URL found in response.")
+                    # Download the video file
+                    video_data = requests.get(video_url)
+                    with open(output_path, "wb") as f:
+                        f.write(video_data.content)
 
-                print(f"[Muapi] Video generation complete! Downloading from {video_url}...")
+                    print(f"[Muapi] Video saved to {output_path}")
+                    return output_path
 
-                # Download the video file
-                video_data = requests.get(video_url)
-                with open(output_path, "wb") as f:
-                    f.write(video_data.content)
+                elif status in ["failed", "error"]:
+                    raise Exception(f"Muapi video generation failed: {poll_data}")
 
-                print(f"[Muapi] Video saved to {output_path}")
-                return output_path
+            raise Exception("Muapi video generation timed out.")
 
-            elif status in ["failed", "error"]:
-                raise Exception(f"Muapi video generation failed: {poll_data}")
+        except Exception as e:
+            print(f"\n[CRITICAL] Video Generation Failed: {e}")
+            print("[FALLBACK] Automatically downgrading to Static Photo generation to prevent pipeline crash...")
+            # We fallback to generating a static image using the same prompt,
+            # and then convert it into a static 5-second MP4 reel so the rest of the pipeline doesn't break.
+            fallback_jpg_path = output_path.replace(".mp4", ".jpg")
+            self.generate_image(prompt, output_path=fallback_jpg_path)
 
-        raise Exception("Muapi video generation timed out.")
+            print("[FALLBACK] Converting fallback image to Reel format...")
+            return self.create_reel_from_image(fallback_jpg_path, output_path=output_path)
 
     def generate_image(self, prompt, output_path="output.jpg"):
         """
