@@ -18,25 +18,25 @@ class MayaSocial:
 
     def login(self):
         """
-        Handles logging into Instagram. Reuses session if possible to avoid flags.
+        Handles logging into Instagram. Reuses session if possible to avoid bot detection.
         """
         try:
-            # Try to load previous session
             if os.path.exists(self.session_file):
+                print(f"Loading saved session from {self.session_file}...")
                 self.cl.load_settings(self.session_file)
-                self.cl.login(self.username, self.password)
-                # Check if session is valid
-                self.cl.get_timeline_feed()
-                print("Successfully logged in using saved session.")
-            else:
-                self.cl.login(self.username, self.password)
-                self.cl.dump_settings(self.session_file)
-                print("Logged in and saved new session.")
-        except LoginRequired:
-            print("Session expired. Re-logging in...")
+                try:
+                    # Test session validity
+                    self.cl.get_timeline_feed()
+                    print("Successfully logged in using saved session (bypass credentials).")
+                    return
+                except Exception as session_err:
+                    print(f"Saved session is invalid/expired: {session_err}. Proceeding with fresh login...")
+
+            # If no session file exists or it has expired, perform full credential login
+            print("Performing fresh credential login...")
             self.cl.login(self.username, self.password)
             self.cl.dump_settings(self.session_file)
-            print("Logged in and saved new session.")
+            print("Successfully logged in and saved new session.")
         except Exception as e:
             print(f"Failed to log in to Instagram: {e}")
             raise e
