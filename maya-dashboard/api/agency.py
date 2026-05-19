@@ -25,10 +25,27 @@ class AgencyCOO:
         ]
 
     def call_agent(self, role_prompt, task_prompt):
-        """Helper to call an individual agent."""
+        """Helper to call an individual agent with automatic retry and backoff on rate limits/quota limits."""
+        import time
         system_instruction = f"{role_prompt}\n\nAgency Style Bible:\n" + "\n".join(self.style_bible)
-        response = self.model.generate_content([system_instruction, task_prompt])
-        return response.text.strip()
+
+        max_retries = 6
+        base_delay = 5  # Start with 5s delay
+
+        for attempt in range(max_retries):
+            try:
+                response = self.model.generate_content([system_instruction, task_prompt])
+                return response.text.strip()
+            except Exception as e:
+                err_str = str(e).lower()
+                is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
+
+                if is_rate_limit and attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt)
+                    print(f"\n[RATE LIMIT] Gemini API rate limit hit. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(sleep_time)
+                else:
+                    raise e
 
     def run_reel_workflow(self, concept):
         print(f"--- [COO] Initializing Ecosystem for Concept: {concept} ---\n")
