@@ -13,7 +13,7 @@ class MayaMedia:
         # We now prefer Muapi.ai for high-fidelity video/image generation, keeping HF as fallback
         if not self.muapi_api_key:
             print("Warning: MUAPI_API_KEY not found, falling back to legacy HF pipeline if available.")
-            self.api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+            self.api_url = "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0"
             self.headers = {"Authorization": f"Bearer {os.getenv('HF_API_KEY')}"}
         else:
             self.api_url = "https://api.muapi.ai/api/v1"
@@ -34,12 +34,13 @@ class MayaMedia:
 
         # We will attempt multiple common video endpoints.
         endpoints_to_try = [
-            f"{self.api_url}/seedance-pro-text-to-video",
-            f"{self.api_url}/kling-master-text-to-video",
+            f"{self.api_url}/seedance-pro-t2v",
+            f"{self.api_url}/kling-v2.1-master-t2v",
+            f"{self.api_url}/kling-v3.0-standard-text-to-video",
             f"{self.api_url}/runway-text-to-video",
             f"{self.api_url}/wan2.1-text-to-video",
             f"{self.api_url}/veo3-fast-text-to-video",
-            f"{self.api_url}/seedance-lite-text-to-video"
+            f"{self.api_url}/seedance-lite-t2v"
         ]
 
         submit_res = None
@@ -129,9 +130,10 @@ class MayaMedia:
         if self.muapi_api_key:
             print("[Muapi] Generating high-fidelity image...")
             image_endpoints = [
-                f"{self.api_url}/flux-dev-image",
-                f"{self.api_url}/flux-schnell-image",
-                f"{self.api_url}/midjourney-text-to-image"
+                f"{self.api_url}/flux-dev",
+                f"{self.api_url}/flux-schnell",
+                f"{self.api_url}/midjourney-v7",
+                f"{self.api_url}/midjourney-v8"
             ]
             payload = {
                 "prompt": prompt,
@@ -208,7 +210,7 @@ class MayaMedia:
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = requests.post("https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+                response = requests.post("https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0",
                                          headers={"Authorization": f"Bearer {hf_key}"},
                                          json=payload)
 
