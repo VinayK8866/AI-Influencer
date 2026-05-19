@@ -29,11 +29,38 @@ class AgencyCOO:
         import time
         system_instruction = f"{role_prompt}\n\nAgency Style Bible:\n" + "\n".join(self.style_bible)
 
-        models_to_try = [
-            'gemini-3-flash-preview',
-            'gemini-1.5-flash',
-            'gemini-1.5-pro'
-        ]
+        # Dynamically discover all supported models on the fly!
+        try:
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
+
+            # Prioritize models: gemini-3 first, then gemini-2.5, gemini-2.0, gemini-1.5
+            preferred_order = ['gemini-3', 'gemini-2.5', 'gemini-2.0', 'gemini-1.5']
+            sorted_models = []
+            for pref in preferred_order:
+                for model in available_models:
+                    if pref in model and model not in sorted_models:
+                        sorted_models.append(model)
+
+            # Append remaining models, avoiding deprecated ones
+            for model in available_models:
+                if model not in sorted_models and not any(dep in model for dep in ['gemini-1.0', 'gemini-pro']):
+                    sorted_models.append(model)
+
+            print(f"[COO] Dynamically discovered and prioritized Gemini models: {sorted_models}")
+            models_to_try = sorted_models if sorted_models else ['models/gemini-3-flash-preview']
+        except Exception as e:
+            print(f"[COO] Failed to dynamically list models: {e}. Falling back to default list.")
+            models_to_try = [
+                'models/gemini-3-flash-preview',
+                'models/gemini-1.5-flash',
+                'models/gemini-1.5-pro',
+                'gemini-3-flash-preview',
+                'gemini-1.5-flash',
+                'gemini-1.5-pro'
+            ]
 
         last_error = None
         for model_name in models_to_try:
