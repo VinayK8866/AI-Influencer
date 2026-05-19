@@ -193,44 +193,61 @@ class MayaMedia:
 
             print("[Muapi] Muapi image generation failed. Falling back to Hugging Face...")
 
-        # For fallback, we use Hugging Face
+        # For fallback, we use Hugging Face with a resilient multi-model fallback loop
         hf_key = os.getenv("HF_API_KEY")
         if not hf_key:
             raise Exception("Cannot generate fallback image. HF_API_KEY is missing from environment variables.")
 
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "negative_prompt": "ugly, blurry, deformed, poorly drawn, AI-perfect, weird hands, extra limbs, cartoon, 3d render, artificial lighting",
-                "num_inference_steps": 50,
-                "guidance_scale": 7.5
-            }
-        }
+        fallback_models = [
+            "black-forest-labs/FLUX.1-schnell",
+            "stabilityai/stable-diffusion-2-1",
+            "runwayml/stable-diffusion-v1-5"
+        ]
 
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = requests.post("https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0",
-                                         headers={"Authorization": f"Bearer {hf_key}"},
-                                         json=payload)
+        last_error = None
+        for model in fallback_models:
+            print(f"[FALLBACK] Attempting Hugging Face generation with model: {model}")
+            url = f"https://router.huggingface.co/hf-inference/models/{model}"
 
-                if response.status_code == 200:
-                    image = Image.open(io.BytesIO(response.content))
-                    image.save(output_path)
-                    print(f"Image successfully saved to {output_path}")
-                    return output_path
-                elif response.status_code == 503:
-                    print(f"Model is loading/unavailable (Attempt {attempt+1}/{max_retries}). Waiting 20 seconds...")
-                    time.sleep(20)
-                else:
-                    raise Exception(f"Failed to generate image: {response.status_code} - {response.text}")
-            except Exception as e:
-                if attempt == max_retries - 1:
-                    raise e
-                print(f"HF Image generation attempt {attempt+1} failed: {e}. Retrying...")
-                time.sleep(5)
+            if "flux" in model.lower():
+                payload = {"inputs": prompt}
+            else:
+                payload = {
+                    "inputs": prompt,
+                    "parameters": {
+                        "negative_prompt": "ugly, blurry, deformed, poorly drawn, AI-perfect, weird hands, extra limbs, cartoon, 3d render, artificial lighting",
+                        "num_inference_steps": 50,
+                        "guidance_scale": 7.5
+                    }
+                }
 
-        raise Exception(f"Failed to generate image after {max_retries} retries: Model failed to wake up.")
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(url, headers={"Authorization": f"Bearer {hf_key}"}, json=payload)
+
+                    if response.status_code == 200:
+                        image = Image.open(io.BytesIO(response.content))
+                        image.save(output_path)
+                        print(f"Image successfully generated via Hugging Face ({model}) and saved to {output_path}")
+                        return output_path
+                    elif response.status_code == 503:
+                        print(f"Model {model} is loading (Attempt {attempt+1}/{max_retries}). Waiting 20 seconds...")
+                        time.sleep(20)
+                    else:
+                        print(f"Model {model} returned status {response.status_code}: {response.text}")
+                        last_error = Exception(f"Failed to generate image via {model}: {response.status_code} - {response.text}")
+                        break
+                except Exception as e:
+                    print(f"Error on {model} (Attempt {attempt+1}): {e}")
+                    last_error = e
+                    time.sleep(5)
+
+            print(f"[FALLBACK] Model {model} failed. Trying next model...")
+
+        if last_error:
+            raise last_error
+        raise Exception("All Hugging Face fallback models failed to generate the image.")
 
     def add_viral_text_to_image(self, image_path, text):
         """
