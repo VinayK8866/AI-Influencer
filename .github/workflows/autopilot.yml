@@ -35,8 +35,8 @@ jobs:
         env:
           IG_SESSION_BASE64: ${{ secrets.IG_SESSION_BASE64 }}
         run: |
-          if [ ! -f maya_autopilot/ig_session.json ] && [ ! -z "$IG_SESSION_BASE64" ]; then
-            echo "Session not found in cache. Restoring from backup secret..."
+          if { [ ! -f maya_autopilot/ig_session.json ] || [ ! -s maya_autopilot/ig_session.json ]; } && [ ! -z "$IG_SESSION_BASE64" ]; then
+            echo "Session not found or empty in cache. Restoring from backup secret..."
             echo "$IG_SESSION_BASE64" | base64 -d > maya_autopilot/ig_session.json
           fi
 
@@ -52,14 +52,16 @@ jobs:
           HF_API_KEY: ${{ secrets.HF_API_KEY }}
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
           IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
+          IG_PROXY: ${{ secrets.IG_PROXY }}
         run: |
           cd maya_autopilot
           python main.py
 
       - name: Check State Files
+        if: always()
         id: check_files
         run: |
-          if [ -f maya_autopilot/state.json ] && [ -f maya_autopilot/ig_session.json ]; then
+          if [ -s maya_autopilot/state.json ] && [ -s maya_autopilot/ig_session.json ]; then
             echo "files_exist=true" >> $GITHUB_OUTPUT
           else
             echo "files_exist=false" >> $GITHUB_OUTPUT

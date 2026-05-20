@@ -2,6 +2,12 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load local environment variables from parent directory's .env.local
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(parent_dir, '.env.local'))
+load_dotenv(os.path.join(parent_dir, '.env')) # Also fallback to standard .env
 
 # Ensure the adjacent python scripts can be imported
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
