@@ -37,7 +37,7 @@ jobs:
         run: |
           if { [ ! -f maya_autopilot/ig_session.json ] || [ ! -s maya_autopilot/ig_session.json ]; } && [ ! -z "$IG_SESSION_BASE64" ]; then
             echo "Session not found or empty in cache. Restoring from backup secret..."
-            echo "$IG_SESSION_BASE64" | base64 -di > maya_autopilot/ig_session.json
+            python3 -c "import base64, os; s = os.environ['IG_SESSION_BASE64'].strip('\'\" \n\r'); open('maya_autopilot/ig_session.json', 'wb').write(base64.b64decode(s))"
           fi
 
       - name: Install Dependencies
