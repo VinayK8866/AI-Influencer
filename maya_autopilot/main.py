@@ -180,7 +180,7 @@ class MayaAutopilot:
                 "messy dark brown shoulder-length bob, silent-luxury casual high-fashion outfit."
             )
             video_prompt = f"{character_anchors} Located in {location}. Candid, natural lighting, motion blur. {storyboard_prompt}"
-            self.media.generate_video(video_prompt, output_path=upload_path, viral_hook_text=parsed_hook)
+            self.media.generate_video(video_prompt, output_path=upload_path, viral_hook_text=parsed_hook, location=location)
 
             # Validate video quality via Quality Gate
             gate = QualityGate(brain=self.brain)

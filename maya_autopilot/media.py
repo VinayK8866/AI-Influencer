@@ -30,7 +30,7 @@ class MayaMedia:
     # VIDEO GENERATION
     # ---------------------------------------------------------------------------
 
-    def generate_video(self, prompt, output_path="output.mp4", viral_hook_text=None):
+    def generate_video(self, prompt, output_path="output.mp4", viral_hook_text=None, location="Goa"):
         """
         Generates a native 9:16 short-form video using the best scored available video provider.
         Falls back to: Best Image → Wan2.1 HF animation → local Ken Burns cinematic engine.
@@ -169,10 +169,22 @@ class MayaMedia:
 
             return output_path
 
-        # ---- FALLBACK: Generate image first ----
-        print("[FALLBACK] Video generation failed or blocked. Generating high-fidelity 9:16 portrait image for animation...")
-        fallback_jpg_path = output_path.replace(".mp4", ".jpg")
-        self.generate_image(prompt, output_path=fallback_jpg_path, aspect_ratio="9:16")
+        # ---- FALLBACK: Generate 3 images first ----
+        print("[FALLBACK] Video generation failed or blocked. Generating 3 montage frames for Rule of Thirds (Face, Outfit, Vibe)...")
+        shot_1_path = "temp_shot_1.jpg"
+        shot_2_path = "temp_shot_2.jpg"
+        shot_3_path = "temp_shot_3.jpg"
+
+        print("[FALLBACK] Generating Shot 1 (Portrait Face)...")
+        self.generate_image(prompt, output_path=shot_1_path, aspect_ratio="9:16")
+
+        print("[FALLBACK] Generating Shot 2 (Outfit Profile)...")
+        outfit_prompt = f"Full body fashion lookup portrait photography of Maya Rossi. " + prompt
+        self.generate_image(outfit_prompt, output_path=shot_2_path, aspect_ratio="9:16")
+
+        print("[FALLBACK] Generating Shot 3 (Scenic Vibe)...")
+        vibe_prompt = f"Cinematic, atmospheric travel B-roll landscape photo of {location}. Beautiful architecture, local culture aesthetic, no people, sunset golden hour light, unedited raw smartphone photo."
+        self.generate_image(vibe_prompt, output_path=shot_3_path, aspect_ratio="9:16")
 
         # ---- FALLBACK Option A: HF Space Wan2.1 image-to-video animation ----
         try:
@@ -184,7 +196,7 @@ class MayaMedia:
             print("[FALLBACK] [Option A] Submitting to Wan2.1 Space (may queue up to 3min)...")
 
             result = client.predict(
-                input_image=handle_file(fallback_jpg_path),
+                input_image=handle_file(shot_1_path),
                 prompt="cinematic video, beautiful influencer smiling, subtle head motion, slow cinematic camera pan",
                 height=960,
                 width=544,
@@ -220,9 +232,25 @@ class MayaMedia:
         except Exception as hf_err:
             print(f"[FALLBACK] [Option A] HF Space failed ({hf_err}). Using local cinematic engine...")
 
-        # ---- FALLBACK Option B: Local Ken Burns cinematic zoom ----
-        print("[FALLBACK] [Option B] Rendering with local cinematic Ken Burns engine...")
-        return self.create_reel_from_image(fallback_jpg_path, output_path=output_path, viral_hook_text=viral_hook_text)
+        # ---- FALLBACK Option B: Local 3-shot montage video engine ----
+        print("[FALLBACK] [Option B] Rendering with local 3-shot montage engine...")
+        try:
+            self.create_reel_montage(
+                shot_1_path, 
+                shot_2_path, 
+                shot_3_path, 
+                output_path=output_path, 
+                viral_hook_text=viral_hook_text
+            )
+        finally:
+            # Clean up montage temp image frames
+            for path in [shot_1_path, shot_2_path, shot_3_path]:
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+        return output_path
 
     # ---------------------------------------------------------------------------
     # IMAGE GENERATION
@@ -760,6 +788,85 @@ class MayaMedia:
 
         clip.write_videofile(output_path, fps=24, codec="libx264", audio=has_audio, verbose=False, logger=None)
         print(f"[Ken Burns] Cinematic Reel saved to {output_path}")
+        return output_path
+
+    def create_reel_montage(self, shot_1_path, shot_2_path, shot_3_path, output_path="output.mp4", viral_hook_text=None):
+        """
+        Stitches 3 shots (Face, Outfit, Vibe) together into a 9-second cinematic montage.
+        """
+        # Patch PIL.Image.ANTIALIAS for modern PIL compatibility inside moviepy
+        try:
+            import PIL.Image
+            if not hasattr(PIL.Image, 'ANTIALIAS'):
+                PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
+        except Exception:
+            pass
+
+        # Overlay text on the first shot if needed
+        if viral_hook_text:
+            print(f"[Montage] Overlaying viral hook on primary shot: '{viral_hook_text}'")
+            self.add_viral_text_to_image(shot_1_path, text=viral_hook_text)
+
+        from moviepy.editor import ImageClip, concatenate_videoclips
+        import numpy as np
+
+        print(f"[Montage] Rendering 3-shot montage video from: {shot_1_path}, {shot_2_path}, {shot_3_path}")
+
+        clips = []
+        for path in [shot_1_path, shot_2_path, shot_3_path]:
+            if not os.path.exists(path):
+                continue
+            clip = ImageClip(path)
+            
+            # Enforce even dimensions (FFmpeg requirement)
+            W, H = clip.size
+            even_w = W - (W % 2)
+            even_h = H - (H % 2)
+            if even_w != W or even_h != H:
+                clip = clip.resize(newsize=(even_w, even_h))
+            W, H = even_w, even_h
+
+            # Define cinematic Ken Burns zoom/pan for 3 seconds
+            def cinematic_motion(get_frame, t):
+                frame = get_frame(t)
+                h, w, c = frame.shape
+                scale = 1.0 + 0.03 * t
+                crop_w = int(w / scale)
+                crop_h = int(h / scale)
+                max_pan_x = int(w * 0.03)
+                pan_x = int(max_pan_x * (1.0 - (t / 3.0)))
+                x1 = max(0, (w - crop_w) // 2 - pan_x)
+                y1 = max(0, (h - crop_h) // 2)
+                x2 = min(w, x1 + crop_w)
+                y2 = min(h, y1 + crop_h)
+                cropped = frame[y1:y2, x1:x2]
+                img = Image.fromarray(cropped)
+                resized = img.resize((w, h), Image.Resampling.LANCZOS)
+                return np.array(resized)
+
+            clip = clip.fl(cinematic_motion).set_duration(3)
+            clips.append(clip)
+
+        if not clips:
+            raise Exception("No valid image frames found for montage.")
+
+        final_clip = concatenate_videoclips(clips, method="compose")
+
+        # Mix background music
+        has_audio = False
+        try:
+            music_path = self.download_background_music()
+            if music_path and os.path.exists(music_path):
+                from moviepy.editor import AudioFileClip
+                print("[Montage] Mixing background audio...")
+                audio = AudioFileClip(music_path).subclip(0, 9).audio_fadeout(1.0)
+                final_clip = final_clip.set_audio(audio)
+                has_audio = True
+        except Exception as audio_err:
+            print(f"[Montage] Audio mixing failed ({audio_err}). Proceeding silent.")
+
+        final_clip.write_videofile(output_path, fps=24, codec="libx264", audio=has_audio, verbose=False, logger=None)
+        print(f"[Montage] 3-Shot Cinematic Reel saved to {output_path}")
         return output_path
 
 
