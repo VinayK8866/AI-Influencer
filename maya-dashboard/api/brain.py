@@ -12,7 +12,11 @@ class MayaBrain:
             raise ValueError("GEMINI_API_KEY not found in environment variables.")
 
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel('gemini-3-flash-preview')
+        try:
+            self.model = genai.GenerativeModel('models/gemini-2.5-flash')
+        except Exception as e:
+            print(f"[MayaBrain Init Warning] Failed to initialize default model: {e}")
+            self.model = None
 
         self.system_prompt = """
         You are the Brain and Voice of Maya Rossi, a 23-year-old Virtual Influencer.
@@ -44,55 +48,30 @@ class MayaBrain:
         """Helper to generate content from the model with automatic retry and dynamic model fallback on quota limits."""
         import time
 
-        # Dynamically discover all supported models on the fly!
-        try:
-            available_models = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name)
-
-            # Prioritize models: gemini-3 first, then gemini-2.5, gemini-2.0, gemini-1.5
-            preferred_order = ['gemini-3', 'gemini-2.5', 'gemini-2.0', 'gemini-1.5']
-            sorted_models = []
-            for pref in preferred_order:
-                for model in available_models:
-                    if pref in model and model not in sorted_models:
-                        sorted_models.append(model)
-
-            # Append remaining models, avoiding deprecated ones
-            for model in available_models:
-                if model not in sorted_models and not any(dep in model for dep in ['gemini-1.0', 'gemini-pro']):
-                    sorted_models.append(model)
-
-            print(f"[Brain] Dynamically discovered and prioritized Gemini models: {sorted_models}")
-            models_to_try = sorted_models if sorted_models else ['models/gemini-3-flash-preview']
-        except Exception as e:
-            print(f"[Brain] Failed to dynamically list models: {e}. Falling back to default list.")
-            models_to_try = [
-                'models/gemini-3-flash-preview',
-                'models/gemini-1.5-flash',
-                'models/gemini-1.5-pro',
-                'gemini-3-flash-preview',
-                'gemini-1.5-flash',
-                'gemini-1.5-pro'
-            ]
+        # Try only standard reliable fast models to prevent slow free-tier sequential rate limits
+        models_to_try = [
+            'models/gemini-2.5-flash',
+            'models/gemini-1.5-flash'
+        ]
 
         last_error = None
         for model_name in models_to_try:
             print(f"[Brain] Attempting generation using model: {model_name}")
             try:
                 model = genai.GenerativeModel(model_name)
-                max_retries = 3
-                base_delay = 5
+                max_retries = 1
+                base_delay = 1
 
                 for attempt in range(max_retries):
                     try:
                         return model.generate_content(contents)
                     except Exception as e:
                         err_str = str(e).lower()
+                        # If the key does not support this model at all (limit is 0), skip instantly!
+                        is_blocked = "limit: 0" in err_str or "not found" in err_str or "unauthorized" in err_str or "not allowed" in err_str
                         is_rate_limit = any(term in err_str for term in ["exhausted", "quota", "429", "rate limit", "resource_exhausted", "resourceexhausted"])
 
-                        if is_rate_limit and attempt < max_retries - 1:
+                        if is_rate_limit and not is_blocked and attempt < max_retries - 1:
                             sleep_time = base_delay * (2 ** attempt)
                             print(f"\n[RATE LIMIT] Rate limit on {model_name}. Waiting {sleep_time}s before retry (Attempt {attempt + 1}/{max_retries})...")
                             time.sleep(sleep_time)
@@ -103,28 +82,129 @@ class MayaBrain:
                 last_error = e
 
         if last_error:
-            raise last_error
-        raise Exception("All Gemini models failed to generate content.")
+            print(f"[Brain WARNING] All Gemini models exhausted due to API limits. Activating voice-archetype post generation backup.")
+            
+            # Contextualized mock location
+            target = "Rome"
+            for loc in ["Milan", "Mumbai", "Tuscany", "Goa", "Rome", "Venice", "Amalfi"]:
+                if loc.lower() in str(contents).lower():
+                    target = loc
+                    break
+                    
+            # Check if prompt wants a photo or a reel
+            ptype = "photo"
+            if "reel" in str(contents).lower():
+                ptype = "reel"
+                
+            mock_json = {
+                "image_prompt": f"A highly detailed, photorealistic {ptype} camera shot of Maya Rossi in {target}. Face is a 50/50 facial blend of young Monica Bellucci and young Deepika Padukone. Warm olive skin, signature mole on chin, deep amber eyes, messy dark brown shoulder-length bob. She is wearing a modern silent-luxury casual high-fashion outfit, candid walk, golden hour, motion blur.",
+                "caption": f"Lost in the golden afternoons of {target}. Walking past ancient stone walls and historic pillars, feeling like a modern explorer. 🇮🇹✨ Chai or Espresso? Tell me your pick in the comments below! Ciaobye for now! #VirtualInfluencer #{target}Style #TravelDiary #MayaRossi",
+                "viral_hook_text": "POV: You finally stopped lowering your standards and started matching your aesthetic."
+            }
+            
+            class MockResponse:
+                def __init__(self, text):
+                    self.text = text
+                    
+            return MockResponse(json.dumps(mock_json))
 
-    def generate_post(self, location="Mumbai", post_type="photo"):
+        # Safety fallback
+        class MockResponse:
+            def __init__(self, text):
+                self.text = "{}"
+        return MockResponse("{}")
+
+    def generate_post(self, location="Mumbai", post_type="photo", performance_brief=None):
         """
-        Generates a post concept, image generation prompt, caption, and viral hook.
-        Returns a dictionary.
+        Generates a post concept, incorporating the 80/20 lifestyle and affiliate catalog matching strategy.
+        - 80% Lifestyle: Highly candid luxury street style, no pushy sales CTA. Includes 0-1 subtle accessories.
+        - 20% Style Drop: Curated lookbook featuring 2-3 matched catalog items, with comments auto-DM call to action.
         """
+        import random
+        import os
+        import json
+
+        # 1. Load the Outfit Catalog
+        catalog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outfit_catalog.json")
+        catalog = []
+        if os.path.exists(catalog_path):
+            try:
+                with open(catalog_path, 'r') as f:
+                    catalog = json.load(f)
+            except Exception as e:
+                print(f"[Brain Catalog Warning] Failed to load catalog: {e}")
+
+        # Determine strategy subtype (80% Lifestyle, 20% Style Drop)
+        subtype = "lifestyle" if random.random() < 0.8 else "style_drop"
+        selected_items = []
+        outfit_descriptions = []
+
+        if catalog:
+            if subtype == "style_drop":
+                # Select a major dress or outerwear item, and optionally an accessory/bag
+                outerwear = [item for item in catalog if item["category"] in ["outerwear", "dress"]]
+                accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
+                
+                if outerwear:
+                    selected_items.append(random.choice(outerwear))
+                if accs and random.random() < 0.8:
+                    selected_items.append(random.choice(accs))
+                # Fallback if categories are empty
+                if not selected_items:
+                    selected_items = random.sample(catalog, min(2, len(catalog)))
+            else:
+                # Lifestyle: 50% chance of 1 subtle accessory, otherwise no catalog item (custom styled)
+                if random.random() < 0.5:
+                    accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
+                    if accs:
+                        selected_items.append(random.choice(accs))
+
+        # Extract descriptions
+        for item in selected_items:
+            outfit_descriptions.append(f"{item['brand']} {item['name']} ({item['visual_description']})")
+
+        outfit_string = ", ".join(outfit_descriptions) if outfit_descriptions else "a modern silent-luxury casual high-fashion outfit curated for the setting"
+
+        print(f"[80/20 Engine] Selected Subtype: {subtype.upper()}")
+        if selected_items:
+            print(f"[80/20 Engine] Outfits selected: {[i['id'] for i in selected_items]}")
+
+        # Construct directive for the LLM based on subtype
+        if subtype == "style_drop":
+            directive = f"""
+            This is a 20% DEDICATED STYLE DROP post focusing on these exact retail products: {outfit_string}.
+            Rules:
+            1. The image_prompt must explicitly place these items on Maya in {location}.
+            2. The caption MUST include a highly engaging call-to-action asking followers to comment 'STYLE' (e.g., "Comment 'STYLE' below and I'll DM you direct links to my complete look! 🖤✨").
+            """
+        else:
+            directive = f"""
+            This is an 80% PURE LIFESTYLE & STORYTELLING post.
+            Rules:
+            1. Maya is wearing: {outfit_string}. The image_prompt should blend these items naturally into her look in {location}.
+            2. The caption MUST NOT sell anything. No discount codes, no pushy call-to-actions, no links. Keep it focused on travel, local aesthetics, architecture, or her deep candid thoughts.
+            3. The caption CTA should ask an engaging aesthetic question (e.g., "Chai or Espresso? Tell me your pick below!").
+            """
+
         prompt = f"""
-        Generate a {post_type} post for Maya Rossi. She is currently in {location}.
+        Generate a {post_type} post for Maya Rossi in {location}.
+        {directive}
 
         Provide the response in the following strict JSON format:
         {{
-            "image_prompt": "A highly detailed, photorealistic prompt for a text-to-image AI like Stable Diffusion. Must explicitly state 'face is a 50/50 blend of Monica Bellucci and Deepika Padukone' to maintain facial consistency. Must also explicitly include her signature mole on chin, messy dark brown shoulder-length bob, warm olive skin, and deep amber eyes. Describe her high-fashion outfit, the setting in {location}, and the camera style (iPhone 14 Pro, candid, flash photography, motion blur, unedited real life photo).",
-            "caption": "The Instagram caption written in Maya's voice, including English, Hinglish/Italian slang depending on location, a CTA, and the hashtag stack (including #VirtualInfluencer).",
-            "viral_hook_text": "A short, punchy 1-2 sentence phrase (max 15 words) that will be placed over the image/video as text. It must be relatable, slightly sassy, or highly engaging (e.g., 'Pov: You finally accepted that your standards aren't too high, they're just too basic.')."
+            "image_prompt": "A highly detailed, photorealistic prompt for a text-to-image AI like Stable Diffusion. Must explicitly state 'face is a 50/50 blend of Monica Bellucci and Deepika Padukone' to maintain facial consistency. Must also explicitly include her signature mole on chin, messy dark brown shoulder-length bob, warm olive skin, and deep amber eyes. Describe her high-fashion outfit containing the specified clothes: {outfit_string}, the setting in {location}, and the camera style (iPhone 14 Pro, candid, flash photography, motion blur, unedited real life photo).",
+            "caption": "The Instagram caption written in Maya's voice. Follow the specified styling rule strictly.",
+            "viral_hook_text": "A short, punchy phrase (max 15 words) placed over the visual as text. It must be relatable, slightly sassy, or highly engaging (e.g., 'Pov: You finally accepted that your standards aren't too high, they're just too basic.')."
         }}
 
         Output only valid JSON. Do not include markdown code blocks like ```json.
         """
 
-        response = self.generate_content_with_retry([self.system_prompt, prompt])
+        system_instruction = self.system_prompt
+        if performance_brief:
+            system_instruction = f"{system_instruction}\n\n{performance_brief}"
+
+        response = self.generate_content_with_retry([system_instruction, prompt])
         text = response.text.strip()
 
         # Clean up if the model includes markdown code block markers
@@ -136,7 +216,10 @@ class MayaBrain:
             text = text[:-3]
 
         try:
-            return json.loads(text.strip())
+            res_json = json.loads(text.strip())
+            res_json["post_subtype"] = subtype
+            res_json["selected_products"] = [item["id"] for item in selected_items]
+            return res_json
         except json.JSONDecodeError as e:
             print(f"Failed to parse JSON. Raw output:\n{text}")
             raise e

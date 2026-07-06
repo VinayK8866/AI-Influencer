@@ -1,0 +1,74 @@
+[
+  {
+    "id": "espresso_trench_coat",
+    "name": "Classic Espresso Double-Breasted Trench Coat",
+    "category": "outerwear",
+    "brand": "Zara Style",
+    "visual_description": "a classic double-breasted coffee-brown trench coat with structured shoulders, belt waist, and dark tortoise-shell buttons",
+    "affiliate_link": "https://www.amazon.com/s?k=womens+espresso+trench+coat&tag=mayarossi-20",
+    "price": "$89.90"
+  },
+  {
+    "id": "slate_grey_blazer",
+    "name": "Oversized Tailored Slate Grey Blazer",
+    "category": "outerwear",
+    "brand": "Zara Style",
+    "visual_description": "an oversized structured slate grey tailored wool blazer with micro-grid textures and wide lapels",
+    "affiliate_link": "https://www.amazon.com/s?k=womens+oversized+grey+blazer&tag=mayarossi-20",
+    "price": "$79.90"
+  },
+  {
+    "id": "cream_silk_scarf",
+    "name": "Crema Mulberry Silk Square Scarf",
+    "category": "accessories",
+    "brand": "Mango Style",
+    "visual_description": "a light cream-colored high-gloss mulberry silk square scarf tied loosely around her neck",
+    "affiliate_link": "https://www.amazon.com/s?k=cream+silk+scarf&tag=mayarossi-20",
+    "price": "$28.00"
+  },
+  {
+    "id": "tan_leather_handbag",
+    "name": "Structured Pebbled Tan Leather Handbag",
+    "category": "bag",
+    "brand": "Polene Style",
+    "visual_description": "a structured minimalist tan pebbled-leather handbag with gold clasps and clean architectural edges",
+    "affiliate_link": "https://www.amazon.com/s?k=tan+pebbled+leather+handbag&tag=mayarossi-20",
+    "price": "$120.00"
+  },
+  {
+    "id": "black_knit_dress",
+    "name": "Ribbed Knit High-Neck Bodycon Dress",
+    "category": "dress",
+    "brand": "Massimo Dutti Style",
+    "visual_description": "a form-fitting ribbed black knit high-neck midi bodycon dress with elegant side slits",
+    "affiliate_link": "https://www.amazon.com/s?k=womens+black+ribbed+knit+dress&tag=mayarossi-20",
+    "price": "$95.00"
+  },
+  {
+    "id": "gold_chunky_hoops",
+    "name": "18k Gold Plated Chunky Teardrop Hoops",
+    "category": "accessories",
+    "brand": "Bottega Style",
+    "visual_description": "chunky teardrop gold plated statement earrings with high-gloss metallic reflections",
+    "affiliate_link": "https://www.amazon.com/s?k=chunky+gold+teardrop+hoops&tag=mayarossi-20",
+    "price": "$35.00"
+  },
+  {
+    "id": "emerald_satin_slip",
+    "name": "Liquid Emerald Green Satin Slip Dress",
+    "category": "dress",
+    "brand": "Gucci Style",
+    "visual_description": "a liquid-like emerald green satin slip dress with thin spaghetti straps and a low-cut cowl neckline",
+    "affiliate_link": "https://www.amazon.com/s?k=emerald+satin+slip+dress&tag=mayarossi-20",
+    "price": "$110.00"
+  },
+  {
+    "id": "minimalist_sunglasses",
+    "name": "90s Oval Tortoise-Shell Sunglasses",
+    "category": "accessories",
+    "brand": "Celine Style",
+    "visual_description": "classic 90s vintage oval tortoise-shell sunglasses with dark green-tinted lenses",
+    "affiliate_link": "https://www.amazon.com/s?k=vintage+tortoiseshell+sunglasses&tag=mayarossi-20",
+    "price": "$45.00"
+  }
+]

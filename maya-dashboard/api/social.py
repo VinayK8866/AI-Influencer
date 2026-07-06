@@ -30,6 +30,13 @@ class MayaSocial:
         if self.proxy:
             print(f"Configuring Instagram proxy: {self.proxy}")
             self.cl.set_proxy(self.proxy)
+        else:
+            print("\n" + "!"*80)
+            print("⚠️  WARNING: IG_PROXY is not configured!")
+            print("Running directly from a datacenter container IP (like Vercel or CI/CD runner)")
+            print("is extremely likely to trigger Instagram security checkpoint challenges.")
+            print("A high-quality residential/mobile proxy is strongly recommended.")
+            print("!"*80 + "\n")
 
     def handle_exception(self, e, action_name):
         """

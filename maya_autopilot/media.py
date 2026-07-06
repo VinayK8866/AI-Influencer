@@ -110,13 +110,45 @@ class MayaMedia:
 
         except Exception as e:
             print(f"\n[CRITICAL] Video Generation Failed: {e}")
-            print("[FALLBACK] Automatically downgrading to Static Photo generation to prevent pipeline crash...")
-            # We fallback to generating a static image using the same prompt,
-            # and then convert it into a static 5-second MP4 reel so the rest of the pipeline doesn't break.
+            print("[FALLBACK] Automatically generating high-fidelity static image first to maintain facial consistency...")
             fallback_jpg_path = output_path.replace(".mp4", ".jpg")
             self.generate_image(prompt, output_path=fallback_jpg_path)
 
-            print("[FALLBACK] Converting fallback image to Reel format...")
+            # Option A: Attempt to animate static image via public Hugging Face ZeroGPU Space
+            try:
+                print("[FALLBACK] [Option A] Attempting to animate static image via Hugging Face Space (multimodalart/wan2-1-fast)...")
+                from gradio_client import Client, handle_file
+                import shutil
+                
+                client = Client("multimodalart/wan2-1-fast", timeout=12)
+                print("[FALLBACK] [Option A] Submitting to Wan2.1 Space...")
+                
+                result = client.predict(
+                    input_image=handle_file(fallback_jpg_path),
+                    prompt="candid cinematic video, beautiful virtual influencer smiling, dynamic face motion, slow camera pan",
+                    height=512,
+                    width=896,
+                    negative_prompt="Bright tones, overexposed, static, blurred details, low quality, watermark, text",
+                    duration_seconds=2,
+                    guidance_scale=5.0,
+                    steps=10,
+                    seed=42,
+                    randomize_seed=True,
+                    api_name="/generate_video"
+                )
+                
+                if isinstance(result, tuple) and len(result) > 0:
+                    video_info = result[0]
+                    video_path = video_info.get("video") if isinstance(video_info, dict) else video_info
+                    if video_path and os.path.exists(video_path):
+                        shutil.copy(video_path, output_path)
+                        print(f"[FALLBACK] [Option A] Successfully animated video using HF Space and saved to {output_path}!")
+                        return output_path
+                raise Exception("Invalid result structure from Hugging Face Space.")
+            except Exception as hf_err:
+                print(f"[FALLBACK] [Option A Info] Hugging Face Space queue busy or timed out ({hf_err}). Swapping seamlessly to local dynamic engine...")
+
+            print("[FALLBACK] Converting fallback image to Reel format via local cinematic engine...")
             return self.create_reel_from_image(fallback_jpg_path, output_path=output_path)
 
     def generate_image(self, prompt, output_path="output.jpg"):
@@ -245,9 +277,30 @@ class MayaMedia:
 
             print(f"[FALLBACK] Model {model} failed. Trying next model...")
 
+        if os.getenv("DRY_RUN", "false").lower() == "true":
+            print("\n⚠️  [DRY_RUN] Image generation APIs failed or unauthorized. Creating a solid color mock test image for local verification...")
+            self.create_mock_image(output_path, text=prompt)
+            return output_path
+
         if last_error:
             raise last_error
         raise Exception("All Hugging Face fallback models failed to generate the image.")
+
+    def create_mock_image(self, output_path="output.jpg", text="Mock Asset"):
+        """
+        Generates a standard test image for local development and verification.
+        """
+        from PIL import ImageDraw
+        print(f"[MOCK] Rendering local mock image asset: {output_path}")
+        img = Image.new('RGB', (1024, 1024), color=(33, 37, 43))
+        draw = ImageDraw.Draw(img)
+        
+        # Simple aesthetic borders and text center
+        draw.rectangle([(50, 50), (974, 974)], outline=(255, 198, 10), width=4)
+        draw.text((100, 480), f"MAYA AUTOPILOT\n[DRY_RUN ACTIVE]\n\nPrompt Preview:\n{text[:80]}...", fill=(255, 255, 255))
+        img.save(output_path)
+        print(f"[MOCK] Mock image successfully saved to {output_path}")
+        return output_path
 
 
     def add_viral_text_to_image(self, image_path, text):
@@ -317,26 +370,172 @@ class MayaMedia:
         out.save(image_path)
         return image_path
 
+    def download_background_music(self, vibe="random"):
+        """
+        Downloads and caches a dynamic rotation of high-quality, copyright-safe background tracks.
+        Hits the live Jamendo CC-Music API to retrieve thousands of diverse electronic/chill tracks.
+        Falls back to a curated robust list of stable tracks if the API is offline or rate-limited.
+        """
+        import urllib.request
+        import random
+        import json
+        import os
+
+        music_dir = "assets"
+        os.makedirs(music_dir, exist_ok=True)
+
+        # 1. Try fetching from live Jamendo CC-licensed music API for massive variety
+        try:
+            # Sourced via public CC developer Client ID (completely free & open search)
+            api_url = "https://api.jamendo.com/v3.0/tracks/?client_id=56d30c95&format=json&limit=30&tags=electronic,house,lounge,chill&audioformat=mp32"
+            print("[Music API] Querying Jamendo API for trending copyright-safe beats...")
+            
+            req = urllib.request.Request(
+                api_url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                api_data = json.loads(response.read().decode('utf-8'))
+                results = api_data.get("results", [])
+                
+                if results:
+                    selected_track = random.choice(results)
+                    track_id = selected_track.get("id")
+                    track_name = selected_track.get("name")
+                    audio_url = selected_track.get("audio")
+                    
+                    if audio_url:
+                        music_path = os.path.join(music_dir, f"jamendo_{track_id}.mp3")
+                        if not os.path.exists(music_path):
+                            print(f"[Music API] Downloading '{track_name}' (ID: {track_id}) dynamically...")
+                            down_req = urllib.request.Request(
+                                audio_url, 
+                                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                            )
+                            with urllib.request.urlopen(down_req, timeout=12) as down_res, open(music_path, 'wb') as out_file:
+                                out_file.write(down_res.read())
+                            print(f"[Music API] Successfully cached and set dynamic track: '{track_name}'")
+                        return music_path
+        except Exception as api_err:
+            print(f"[Music API Warning] Jamendo CC API issue ({api_err}). Swapping to cached fallbacks...")
+
+        # 2. Curated Bulletproof fallback playlist (16 stable direct-download tracks)
+        playlist = [
+            f"https://www.soundhelix.com/examples/mp3/SoundHelix-Song-{i}.mp3" for i in range(1, 17)
+        ]
+        selected_fallback = random.choice(playlist)
+        song_num = selected_fallback.split("-")[-1].replace(".mp3", "")
+        music_path = os.path.join(music_dir, f"bg_music_fallback_{song_num}.mp3")
+        
+        if not os.path.exists(music_path):
+            print(f"[Music Fallback] Downloading cached synth track {song_num}...")
+            try:
+                req = urllib.request.Request(
+                    selected_fallback, 
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as response, open(music_path, 'wb') as out_file:
+                    out_file.write(response.read())
+                print(f"[Music Fallback] Successfully cached track {song_num}")
+            except Exception as e:
+                print(f"[Music Warning] Could not retrieve fallback track: {e}")
+                # Ultimate fallback: return any existing mp3 file in the directory
+                existing = [os.path.join(music_dir, f) for f in os.listdir(music_dir) if f.endswith(".mp3")]
+                if existing:
+                    return random.choice(existing)
+                return None
+        return music_path
+
     def create_reel_from_image(self, image_path, output_path="output.mp4"):
         """
         Creates a basic "Reel" (short video) from a static image.
         For a completely free tier without API limits, we use moviepy to make a panning/zooming
         effect on the image to simulate motion.
         """
+        # Patch PIL.Image.ANTIALIAS for compatibility with modern PIL versions inside moviepy
+        try:
+            import PIL.Image
+            if not hasattr(PIL.Image, 'ANTIALIAS'):
+                PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
+        except Exception:
+            pass
+
         from moviepy.editor import ImageClip
 
         print(f"Converting image {image_path} to Reel {output_path}")
 
         # Load the image
         clip = ImageClip(image_path)
-
-        # Make a simple 5-second video from the image
-        # Note: A real implementation might add Ken Burns effect (zoom/pan) or attach audio.
-        # For simplicity and robust execution without complex ffmpeg filters, we create a static 5s clip.
+        
+        # Enforce even dimensions to prevent FFmpeg stride and pixel format alignment glitches
+        W, H = clip.size
+        even_w = W - (W % 2)
+        even_h = H - (H % 2)
+        if even_w != W or even_h != H:
+            print(f"[Reel] Forcing even dimensions: {even_w}x{even_h} for video container...")
+            clip = clip.resize(newsize=(even_w, even_h))
+            
+        W, H = even_w, even_h
+        
+        # Apply premium cinematic zoom and pan effect to make the static image feel like moving footage
+        def cinematic_motion(get_frame, t):
+            frame = get_frame(t)
+            h, w, c = frame.shape
+            
+            # Gentle zoom factor: from 1.0 to 1.15 over 5 seconds
+            scale = 1.0 + 0.03 * t
+            
+            # Sub-rectangle dimensions to crop
+            crop_w = int(w / scale)
+            crop_h = int(h / scale)
+            
+            # Slow cinematic pan from left to center
+            max_pan_x = int(w * 0.03)
+            pan_x = int(max_pan_x * (1.0 - (t / 5.0)))
+            
+            x1 = max(0, (w - crop_w) // 2 - pan_x)
+            y1 = max(0, (h - crop_h) // 2)
+            
+            # Ensure boundaries are strictly safe
+            x2 = min(w, x1 + crop_w)
+            y2 = min(h, y1 + crop_h)
+            
+            cropped = frame[y1:y2, x1:x2]
+            
+            # Resize cropped region back to the container dimensions using high-quality anti-aliasing
+            img = Image.fromarray(cropped)
+            resized_img = img.resize((w, h), Image.Resampling.LANCZOS)
+            
+            import numpy as np
+            return np.array(resized_img)
+            
+        clip = clip.fl(cinematic_motion)
         clip = clip.set_duration(5)
 
-        # Set frames per second
-        clip.write_videofile(output_path, fps=24, codec="libx264", audio=False, verbose=False, logger=None)
+        # Integrate high-quality background audio with a smooth fade-out for looping
+        has_audio = False
+        try:
+            music_path = self.download_background_music()
+            if music_path and os.path.exists(music_path):
+                from moviepy.editor import AudioFileClip
+                print("[Music] Mixing high-energy background audio track...")
+                # Slice first 5 seconds of the audio and fade out the last 1.0s for a clean loop
+                audio = AudioFileClip(music_path).subclip(0, 5).audio_fadeout(1.0)
+                clip = clip.set_audio(audio)
+                has_audio = True
+                print("[Music] Background track successfully mixed into video.")
+        except Exception as audio_err:
+            print(f"[Music Warning] Could not integrate audio track ({audio_err}). Proceeding without sound.")
+
+        # Set frames per second and render video file
+        clip.write_videofile(
+            output_path, 
+            fps=24, 
+            codec="libx264", 
+            audio=has_audio, 
+            verbose=False, 
+            logger=None
+        )
 
         print(f"Reel successfully saved to {output_path}")
         return output_path

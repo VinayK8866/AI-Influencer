@@ -40,3 +40,16 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 *.log
+
+# python cache
+__pycache__/
+*.py[cod]
+
+# local runtime state
+state.json
+engagement_history.json
+
+# generated media drafts/temp files
+public/latest_draft.jpg
+public/latest_draft.mp4
+

@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Restore State Cache
         uses: actions/cache@v4
@@ -35,10 +35,44 @@ jobs:
         env:
           IG_SESSION_BASE64: ${{ secrets.IG_SESSION_BASE64 }}
         run: |
-          if { [ ! -f maya_autopilot/ig_session.json ] || [ ! -s maya_autopilot/ig_session.json ]; } && [ ! -z "$IG_SESSION_BASE64" ]; then
-            echo "Session not found or empty in cache. Restoring from backup secret..."
-            python3 -c "import base64, os, re; raw = os.environ.get('IG_SESSION_BASE64', ''); s = re.sub(r'[^A-Za-z0-9+/]', '', raw); s += 'Q' if len(s) % 4 == 1 else ''; s += '=' * (-len(s) % 4); open('maya_autopilot/ig_session.json', 'wb').write(base64.b64decode(s))"
-          fi
+          python3 -c "
+          import os, base64, json
+          session_path = 'maya_autopilot/ig_session.json'
+          valid = False
+          if os.path.exists(session_path):
+              try:
+                  with open(session_path, 'r') as f:
+                      json.load(f)
+                  valid = True
+                  print('Existing cached session is valid JSON. Skipping restore.')
+              except Exception as e:
+                  print(f'Cached session file is corrupted/invalid: {e}. Removing to force restore.')
+                  try:
+                      os.remove(session_path)
+                  except:
+                      pass
+          
+          if not valid:
+              b64_data = os.environ.get('IG_SESSION_BASE64', '').strip()
+              if b64_data:
+                  print('Restoring session from IG_SESSION_BASE64 secret...')
+                  try:
+                      # Add missing padding if needed
+                      missing_padding = len(b64_data) % 4
+                      if missing_padding:
+                          b64_data += '=' * (4 - missing_padding)
+                      decoded = base64.b64decode(b64_data)
+                      # Verify decoded data is valid JSON before writing
+                      json.loads(decoded)
+                      os.makedirs(os.path.dirname(session_path), exist_ok=True)
+                      with open(session_path, 'wb') as f:
+                          f.write(decoded)
+                      print('Successfully restored and verified backup session.')
+                  except Exception as e:
+                      print(f'Failed to restore/verify backup session: {e}')
+              else:
+                  print('IG_SESSION_BASE64 secret is not configured.')
+          "
 
       - name: Install Dependencies
         run: |
@@ -61,11 +95,29 @@ jobs:
         if: always()
         id: check_files
         run: |
-          if [ -s maya_autopilot/state.json ] && [ -s maya_autopilot/ig_session.json ]; then
-            echo "files_exist=true" >> $GITHUB_OUTPUT
-          else
-            echo "files_exist=false" >> $GITHUB_OUTPUT
-          fi
+          python3 -c "
+          import os, json
+          state_exists = os.path.exists('maya_autopilot/state.json') and os.path.getsize('maya_autopilot/state.json') > 0
+          session_valid = False
+          session_path = 'maya_autopilot/ig_session.json'
+          if os.path.exists(session_path):
+              try:
+                  with open(session_path, 'r') as f:
+                      json.load(f)
+                  session_valid = True
+              except:
+                  pass
+          
+          # We save the cache if state exists OR we have a valid session to avoid cold start issues next time
+          if state_exists or session_valid:
+              print('Valid state or session file detected. Enabling cache save.')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('files_exist=true\n')
+          else:
+              print('No valid state or session files to cache.')
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write('files_exist=false\n')
+          "
 
       - name: Save State Cache
         if: always() && steps.check_files.outputs.files_exist == 'true'

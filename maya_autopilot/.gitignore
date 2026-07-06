@@ -7,3 +7,6 @@ output.jpg
 output.mp4
 *.log
 ig_session.json
+state.json
+engagement_history.json
+

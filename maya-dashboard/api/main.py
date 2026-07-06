@@ -5,13 +5,9 @@ from brain import MayaBrain
 from media import MayaMedia
 from social import MayaSocial
 from agency import AgencyCOO
+from analytics import StrategyOptimizer
 
 import json
-from dotenv import load_dotenv
-
-load_dotenv()
-if not os.getenv("GEMINI_API_KEY"):
-    load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 class MayaAutopilot:
     def __init__(self):
@@ -20,10 +16,9 @@ class MayaAutopilot:
         self.media = MayaMedia()
         self.social = MayaSocial()
         self.agency = AgencyCOO()
+        self.optimizer = StrategyOptimizer()
 
-        # Use /tmp for serverless environments
-        self.tmp_dir = "/tmp" if os.environ.get("VERCEL") else "."
-        self.state_file = os.path.join(self.tmp_dir, "state.json")
+        self.state_file = "state.json"
         self.locations = ["Mumbai", "Milan", "Tuscany", "Goa"]
 
         # Load state from file if it exists, otherwise default
@@ -55,16 +50,39 @@ class MayaAutopilot:
         print(f"\n--- Starting Autopilot Cycle ---")
         print(f"Location: {location} | Type: {post_type}")
 
+        # Compile Algorithmic Performance Strategy Brief
+        try:
+            brief = self.optimizer.generate_performance_brief()
+            print(f"\n[Analytics Strategy Brief Sourced]:\n{brief[:200]}...")
+        except Exception as e:
+            brief = ""
+            print(f"[Analytics Strategy Brief Warning] {e}")
+
+        # Load Outfit Catalog
+        catalog_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outfit_catalog.json")
+        catalog = []
+        if os.path.exists(catalog_path):
+            try:
+                with open(catalog_path, 'r') as f:
+                    catalog = json.load(f)
+            except Exception as e:
+                print(f"[Autopilot Catalog Warning] Failed to load catalog: {e}")
+
+        subtype = "lifestyle"
+        selected_products = []
+
         if post_type == "photo":
             # 1. BRAIN: Generate Concept
             print("\n[1/4] Brain generating Photo concept...")
-            post_data = self.brain.generate_post(location=location, post_type=post_type)
+            post_data = self.brain.generate_post(location=location, post_type=post_type, performance_brief=brief)
+            subtype = post_data.get("post_subtype", "lifestyle")
+            selected_products = post_data.get("selected_products", [])
             print(f"Prompt Generated: {post_data['image_prompt'][:100]}...")
             print(f"Caption Generated: {post_data['caption'][:50]}...")
 
             # 2. MEDIA: Generate Asset
             print("\n[2/4] Media generating visual assets...")
-            upload_path = os.path.join(self.tmp_dir, "maya_temp.jpg")
+            upload_path = "maya_temp.jpg"
             max_retries = 3
             image_verified = False
 
@@ -89,53 +107,145 @@ class MayaAutopilot:
         elif post_type == "reel":
             # 1. AGENCY: Multi-Agent Storyboarding for Reels
             print("\n[1/4] Agency Ecosystem generating Cinematic Reel Storyboard...")
-            concept = f"Luxury Travel & Fashion fusion concept set in {location}."
+            
+            # Select outfit items dynamically for the Reel
+            subtype = "lifestyle" if random.random() < 0.8 else "style_drop"
+            selected_items = []
+            outfit_descriptions = []
+
+            if catalog:
+                if subtype == "style_drop":
+                    outerwear = [item for item in catalog if item["category"] in ["outerwear", "dress"]]
+                    accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
+                    if outerwear:
+                        selected_items.append(random.choice(outerwear))
+                    if accs and random.random() < 0.8:
+                        selected_items.append(random.choice(accs))
+                else:
+                    if random.random() < 0.5:
+                        accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
+                        if accs:
+                            selected_items.append(random.choice(accs))
+
+            for item in selected_items:
+                outfit_descriptions.append(f"{item['brand']} {item['name']} ({item['visual_description']})")
+                selected_products.append(item["id"])
+
+            outfit_string = ", ".join(outfit_descriptions) if outfit_descriptions else "a modern silent-luxury casual high-fashion outfit curated for the setting"
+            
+            print(f"[80/20 Engine] Reel Selected Subtype: {subtype.upper()}")
+            if selected_items:
+                print(f"[80/20 Engine] Reel Outfits selected: {selected_products}")
+
+            if subtype == "style_drop":
+                concept = f"Luxury Travel & Fashion fusion concept set in {location}, featuring these retail clothes: {outfit_string}. Prompt is styled strictly around these items. Caption contains a high-engagement CTA asking followers to comment 'STYLE' to get the direct outfit details.\n\n[PAST PERFORMANCE BRIEF TO ALIGN WITH]:\n{brief}"
+            else:
+                concept = f"Luxury Travel & Storytelling fusion concept set in {location}, featuring this look: {outfit_string}. Prompt styles these items. Caption is a travel diary without any hard-selling, ending in an engaging lifestyle question.\n\n[PAST PERFORMANCE BRIEF TO ALIGN WITH]:\n{brief}"
 
             # Run the multi-agent debate to get the final storyboard and SEO metadata
             agency_output = self.agency.run_reel_workflow(concept)
 
-            upload_path = os.path.join(self.tmp_dir, "maya_temp.mp4")
+            # Extract the generated caption and viral hook
+            metadata = agency_output.get("metadata", "")
+            parsed_caption = ""
+            parsed_hook = ""
+            for line in metadata.split('\n'):
+                if line.startswith("CAPTION:"):
+                    parsed_caption = line.replace("CAPTION:", "").strip()
+                elif line.startswith("VIRAL HOOK:"):
+                    parsed_hook = line.replace("VIRAL HOOK:", "").strip()
+
+            upload_path = "maya_temp.mp4"
             print("\n[2/4] Requesting True Cinematic Video via Muapi...")
 
             # Extract the actual storyboard to use as the video prompt
             storyboard_prompt = agency_output.get("storyboard", "")
 
-            # Construct a prompt for Muapi using the strict storyboard generated by the Creative Director
-            # Face anchoring is added to maintain persona
-            video_prompt = f"Highly realistic cinematic footage set in {location}. Face is a 50/50 blend of Monica Bellucci and Deepika Padukone. {storyboard_prompt}"
-            self.media.generate_video(video_prompt, output_path=upload_path)
-
-            # Extract the generated caption
-            metadata = agency_output.get("metadata", "")
-            parsed_caption = ""
-            for line in metadata.split('\n'):
-                if line.startswith("CAPTION:"):
-                    parsed_caption = line.replace("CAPTION:", "").strip()
-                    break
+            # Construct a prompt for Muapi using the strict storyboard generated by the Creative Director.
+            # We strictly inject all physical identity anchors of Maya Rossi to guarantee maximum character consistency,
+            # especially if the video generation falls back to generating a static image still.
+            character_anchors = (
+                "A highly detailed, photorealistic close-up camera shot of Maya Rossi, "
+                "a 23-year-old Indian-Italian virtual influencer. Face is a 50/50 blend of young Monica Bellucci "
+                "and young Deepika Padukone. Warm olive skin, signature mole on chin, deep amber eyes, "
+                "messy dark brown shoulder-length bob, silent-luxury casual high-fashion outfit."
+            )
+            video_prompt = f"{character_anchors} Located in {location}. Candid, natural lighting, motion blur. {storyboard_prompt}"
+            self.media.generate_video(video_prompt, output_path=upload_path, viral_hook_text=parsed_hook)
 
             if parsed_caption:
-                caption_to_post = f"{parsed_caption}\n\n#VirtualInfluencer #MayasCrew"
+                caption_to_post = parsed_caption
             else:
                 caption_to_post = f"Maya's Crew ✨ Location: {location}. #VirtualInfluencer\n(Scripted by Maya's Elite AI Agency)"
 
         # 3. SOCIAL: Post to Instagram
-        print("\n[3/4] Logging into Instagram...")
-        self.social.login()
+        if os.getenv("DRY_RUN", "false").lower() == "true":
+            print("\n[3/4] DRY_RUN is active. Skipping Instagram Login...")
+            print(f"\n[4/4] DRY_RUN is active. Skipping Publishing {post_type}...")
+            print(f"Would have posted:\nCaption: {caption_to_post}\nMedia: {upload_path}")
+        else:
+            print("\n[3/4] Logging into Instagram...")
+            self.social.login()
 
-        print(f"\n[4/4] Publishing {post_type}...")
-        if post_type == "photo":
-            self.social.post_photo(upload_path, caption_to_post)
-        elif post_type == "reel":
-            self.social.post_reel(upload_path, caption_to_post)
+            print(f"\n[4/4] Publishing {post_type}...")
+            if post_type == "photo":
+                self.social.post_photo(upload_path, caption_to_post)
+            elif post_type == "reel":
+                self.social.post_reel(upload_path, caption_to_post)
+
+        # Copy file to Next.js public/ directory so the user can download/preview it
+        import shutil
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        if "maya-dashboard" in current_dir:
+            public_dir = os.path.join(os.path.dirname(current_dir), "public")
+        else:
+            public_dir = os.path.join(os.path.dirname(current_dir), "maya-dashboard", "public")
+            
+        os.makedirs(public_dir, exist_ok=True)
+        
+        media_filename = f"latest_draft.{'mp4' if post_type == 'reel' else 'jpg'}"
+        public_dest = os.path.join(public_dir, media_filename)
+        
+        media_url = None
+        if os.path.exists(upload_path):
+            try:
+                if os.path.exists(public_dest):
+                    os.remove(public_dest)
+                shutil.copy(upload_path, public_dest)
+                print(f"[Autopilot] Successfully saved draft preview to public: {public_dest}")
+                media_url = f"/{media_filename}?t={int(time.time())}"
+            except Exception as copy_err:
+                print(f"[Autopilot Warning] Failed to copy draft to public: {copy_err}")
+
+        # Update and save State
+        self.state["last_post"] = {
+            "post_type": post_type,
+            "location": location,
+            "subtype": subtype,
+            "products": selected_products,
+            "timestamp": time.time(),
+            "caption": caption_to_post,
+            "media_url": media_url
+        }
+
+        # Record post metrics inside Analytics Feedback Loop!
+        try:
+            self.optimizer.record_post(
+                post_type=post_type,
+                location=location,
+                subtype=subtype,
+                products=selected_products,
+                caption=caption_to_post
+            )
+        except Exception as e:
+            print(f"[Analytics Record Error] Failed to log post: {e}")
 
         # Cleanup temp files
         print("\nCleaning up temporary files...")
-        jpg_path = os.path.join(self.tmp_dir, "maya_temp.jpg")
-        mp4_path = os.path.join(self.tmp_dir, "maya_temp.mp4")
-        if os.path.exists(jpg_path):
-            os.remove(jpg_path)
-        if os.path.exists(mp4_path):
-            os.remove(mp4_path)
+        if os.path.exists("maya_temp.jpg"):
+            os.remove("maya_temp.jpg")
+        if os.path.exists("maya_temp.mp4"):
+            os.remove("maya_temp.mp4")
 
         # Save state at the very end
         self._save_state()
@@ -166,7 +276,9 @@ if __name__ == "__main__":
 
         autopilot.run_cycle(post_type=post_choice)
     except Exception as e:
-        print(f"Autopilot encountered a critical error during execution: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"CRITICAL ERROR in Autopilot Execution:\n{error_trace}")
         # In a CI/CD environment like GitHub actions, we want it to exit with an error code
         # so you get an email notification if it fails.
         import sys
