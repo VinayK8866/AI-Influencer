@@ -6,6 +6,7 @@ from media import MayaMedia
 from social import MayaSocial
 from agency import AgencyCOO
 from analytics import StrategyOptimizer
+from governance import BudgetGovernor, QualityGate
 
 import json
 
@@ -74,7 +75,11 @@ class MayaAutopilot:
         if post_type == "photo":
             # 1. BRAIN: Generate Concept
             print("\n[1/4] Brain generating Photo concept...")
+            governor = BudgetGovernor()
+            governor.check_budget(0.001)  # LLM call budget check
             post_data = self.brain.generate_post(location=location, post_type=post_type, performance_brief=brief)
+            governor.record_spend(0.001)  # Record LLM call cost
+            
             subtype = post_data.get("post_subtype", "lifestyle")
             selected_products = post_data.get("selected_products", [])
             print(f"Prompt Generated: {post_data['image_prompt'][:100]}...")
@@ -85,13 +90,14 @@ class MayaAutopilot:
             upload_path = "maya_temp.jpg"
             max_retries = 3
             image_verified = False
+            gate = QualityGate(brain=self.brain)
 
             for attempt in range(1, max_retries + 1):
                 print(f"--- Image Generation Attempt {attempt}/{max_retries} ---")
                 self.media.generate_image(post_data["image_prompt"], output_path=upload_path)
 
-                # Verify the image quality with the Brain
-                if self.brain.verify_image(upload_path):
+                # Verify the image quality with the Quality Gate (file checks + PIL check + Gemini Vision check)
+                if gate.verify_image(upload_path):
                     image_verified = True
                     break
                 else:
@@ -102,6 +108,11 @@ class MayaAutopilot:
 
             # Add the Viral Text Overlay
             self.media.add_viral_text_to_image(upload_path, post_data["viral_hook_text"])
+            
+            # Post-overlay Quality check
+            if not gate.verify_image(upload_path):
+                print("[Quality Gate Warning] Image after overlay failed validation. Proceeding with caution.")
+                
             caption_to_post = post_data["caption"]
 
         elif post_type == "reel":
@@ -143,7 +154,10 @@ class MayaAutopilot:
                 concept = f"Luxury Travel & Storytelling fusion concept set in {location}, featuring this look: {outfit_string}. Prompt styles these items. Caption is a travel diary without any hard-selling, ending in an engaging lifestyle question.\n\n[PAST PERFORMANCE BRIEF TO ALIGN WITH]:\n{brief}"
 
             # Run the multi-agent debate to get the final storyboard and SEO metadata
+            governor = BudgetGovernor()
+            governor.check_budget(0.005)  # Estimate 5 LLM agent calls ($0.005)
             agency_output = self.agency.run_reel_workflow(concept)
+            governor.record_spend(0.005)  # Record LLM agent calls spend
 
             # Extract the generated caption and viral hook
             metadata = agency_output.get("metadata", "")
@@ -172,6 +186,11 @@ class MayaAutopilot:
             )
             video_prompt = f"{character_anchors} Located in {location}. Candid, natural lighting, motion blur. {storyboard_prompt}"
             self.media.generate_video(video_prompt, output_path=upload_path, viral_hook_text=parsed_hook)
+
+            # Validate video quality via Quality Gate
+            gate = QualityGate(brain=self.brain)
+            if not gate.verify_video(upload_path):
+                raise Exception("[Quality Gate Failure] Generated video Reel did not pass verification checks!")
 
             if parsed_caption:
                 caption_to_post = parsed_caption

@@ -216,7 +216,7 @@ class MayaBrain:
             text = text[:-3]
 
         try:
-            res_json = json.loads(text.strip())
+            res_json = json.loads(text.strip(), strict=False)
             res_json["post_subtype"] = subtype
             res_json["selected_products"] = [item["id"] for item in selected_items]
             return res_json

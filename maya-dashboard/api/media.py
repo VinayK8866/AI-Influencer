@@ -14,11 +14,12 @@ load_dotenv()  # Also pick up any local .env in cwd
 class MayaMedia:
     def __init__(self):
         self.xai_api_key = os.getenv("XAI_API_KEY")
+        self.muapi_api_key = os.getenv("MUAPI_API_KEY")
 
-        if not self.xai_api_key:
-            print("Warning: XAI_API_KEY not found. Image/video generation will fall back to dry-run mock mode.")
+        if not self.xai_api_key and not self.muapi_api_key:
+            print("Warning: Neither XAI_API_KEY nor MUAPI_API_KEY found. Media generation will fall back to legacy HF/mock mode.")
         else:
-            print("[MayaMedia] xAI Grok Imagine API initialized successfully.")
+            print("[MayaMedia] Initialized with active API credentials.")
 
     def _get_xai_client(self):
         """Returns an initialized xAI SDK client."""
@@ -31,56 +32,145 @@ class MayaMedia:
 
     def generate_video(self, prompt, output_path="output.mp4", viral_hook_text=None):
         """
-        Generates a native 9:16 short-form video using the xAI Grok Imagine Video API.
-        Falls back to: xAI image → Wan2.1 HF animation → local Ken Burns cinematic engine.
+        Generates a native 9:16 short-form video using the best scored available video provider.
+        Falls back to: Best Image → Wan2.1 HF animation → local Ken Burns cinematic engine.
         """
         import datetime
+        import time
+        from governance import BudgetGovernor
+        governor = BudgetGovernor()
 
-        print(f"\n[xAI Video] Requesting Video Generation. Prompt: {prompt[:100]}...")
+        xai_key = self.xai_api_key
+        muapi_key = self.muapi_api_key
+        hf_key = os.getenv("HF_API_KEY")
 
-        if self.xai_api_key:
+        # Available video models and their performance scoring profiles
+        # Score = (Quality * 0.4) + (Reliability * 0.4) - (Cost * 2.0)
+        all_video_providers = [
+            {"name": "xai-grok", "endpoint": "grok-imagine-video", "quality": 9.0, "reliability": 9.0, "cost": 0.40, "required_key": xai_key},
+            {"name": "muapi-seedance-pro", "endpoint": "/seedance-pro-t2v", "quality": 9.0, "reliability": 8.5, "cost": 0.35, "required_key": muapi_key},
+            {"name": "muapi-kling-v3", "endpoint": "/kling-v3.0-standard-text-to-video", "quality": 8.5, "reliability": 8.5, "cost": 0.25, "required_key": muapi_key},
+            {"name": "muapi-runway", "endpoint": "/runway-text-to-video", "quality": 8.5, "reliability": 8.0, "cost": 0.30, "required_key": muapi_key},
+            {"name": "muapi-wan2.1", "endpoint": "/wan2.1-text-to-video", "quality": 8.0, "reliability": 9.0, "cost": 0.15, "required_key": muapi_key},
+            {"name": "muapi-veo3", "endpoint": "/veo3-fast-text-to-video", "quality": 8.0, "reliability": 8.0, "cost": 0.20, "required_key": muapi_key},
+            {"name": "muapi-seedance-lite", "endpoint": "/seedance-lite-t2v", "quality": 7.0, "reliability": 8.5, "cost": 0.10, "required_key": muapi_key}
+        ]
+
+        # Filter available ones
+        available_providers = [p for p in all_video_providers if p["required_key"]]
+
+        scored_providers = []
+        for p in available_providers:
+            score = (p["quality"] * 0.4) + (p["reliability"] * 0.4) - (p["cost"] * 2.0)
+            scored_providers.append((score, p))
+
+        scored_providers.sort(key=lambda x: x[0], reverse=True)
+
+        print("\n[Provider Selection] Scored available video providers:")
+        for score, p in scored_providers:
+            print(f" - {p['name']} ({p['endpoint']}): Score {score:.2f} (Quality: {p['quality']}, Reliability: {p['reliability']}, Cost: ${p['cost']})")
+
+        generation_success = False
+
+        for score, provider in scored_providers:
+            cost = provider["cost"]
+            name = provider["name"]
+            endpoint = provider["endpoint"]
+
+            # Check budget limit before calling
             try:
-                client = self._get_xai_client()
-                print("[xAI Video] Submitting to grok-imagine-video (9:16, 5s)...")
-                response = client.video.generate(
-                    prompt=prompt,
-                    model="grok-imagine-video",
-                    aspect_ratio="9:16",
-                    duration=5,
-                    resolution="720p",
-                    timeout=datetime.timedelta(minutes=10)
-                )
+                governor.check_budget(cost)
+            except Exception as budget_err:
+                print(f"[Budget Block] Skipping {name} (${cost}): {budget_err}")
+                continue
 
-                video_url = response.url
-                print(f"[xAI Video] Generation complete! Downloading from {video_url}...")
-                video_data = requests.get(video_url, timeout=60)
-                with open(output_path, "wb") as f:
-                    f.write(video_data.content)
-                print(f"[xAI Video] Video saved to {output_path}")
+            print(f"\n[Generation] Executing {name} with endpoint {endpoint} (Cost: ${cost})...")
 
-                # Mix background music
+            try:
+                if name == "xai-grok":
+                    client = self._get_xai_client()
+                    response = client.video.generate(
+                        prompt=prompt,
+                        model=endpoint,
+                        aspect_ratio="9:16",
+                        duration=5,
+                        resolution="720p",
+                        timeout=datetime.timedelta(minutes=10)
+                    )
+                    video_url = response.url
+                    video_data = requests.get(video_url, timeout=60)
+                    with open(output_path, "wb") as f:
+                        f.write(video_data.content)
+                else:  # Muapi
+                    api_url = "https://api.muapi.ai/api/v1"
+                    headers = {"x-api-key": muapi_key, "Content-Type": "application/json"}
+                    payload = {"prompt": prompt, "duration": 5, "aspect_ratio": "9:16"}
+
+                    full_endpoint = f"{api_url}{endpoint}"
+                    submit_res = requests.post(full_endpoint, headers=headers, json=payload, timeout=60)
+                    if submit_res.status_code not in [200, 202]:
+                        raise Exception(f"Submission failed: {submit_res.status_code} - {submit_res.text}")
+
+                    data = submit_res.json()
+                    request_id = data.get("request_id")
+                    if not request_id:
+                        raise Exception("No request_id returned from Muapi.")
+
+                    # Poll
+                    poll_endpoint = f"{api_url}/predictions/{request_id}/result"
+                    max_attempts = 60
+                    completed = False
+                    for attempt in range(max_attempts):
+                        time.sleep(10)
+                        print(f"[Muapi] Polling... (Attempt {attempt+1}/{max_attempts})")
+                        poll_res = requests.get(poll_endpoint, headers=headers, timeout=30)
+                        if poll_res.status_code != 200:
+                            continue
+                        poll_data = poll_res.json()
+                        status = poll_data.get("status")
+                        if status == "completed":
+                            video_url = poll_data.get("output_url") or poll_data.get("video_url")
+                            if not video_url:
+                                raise Exception("Job completed but no video URL.")
+                            video_data = requests.get(video_url, timeout=60)
+                            with open(output_path, "wb") as f:
+                                f.write(video_data.content)
+                            completed = True
+                            break
+                        elif status in ["failed", "error"]:
+                            raise Exception(f"Muapi job failed: {poll_data}")
+
+                    if not completed:
+                        raise Exception("Muapi job timed out.")
+
+                print(f"[Generation] Successfully generated video using {name} and saved to {output_path}")
+                governor.record_spend(cost)
+                generation_success = True
+                break
+            except Exception as gen_err:
+                print(f"[Generation Warning] {name} generation failed: {gen_err}")
+                continue
+
+        if generation_success:
+            # Mix background music
+            try:
+                print("[Video Post-Gen] Mixing background audio track...")
+                self.add_music_to_video(output_path)
+            except Exception as audio_err:
+                print(f"[Music Warning] Could not mix music: {audio_err}")
+
+            # Burn viral hook overlay
+            if viral_hook_text:
                 try:
-                    print("[xAI Video] Mixing background audio track...")
-                    self.add_music_to_video(output_path)
-                except Exception as audio_err:
-                    print(f"[Music Warning] Could not mix music: {audio_err}")
+                    print(f"[Video Post-Gen] Burning viral hook overlay...")
+                    self.overlay_text_on_video(output_path, viral_hook_text)
+                except Exception as overlay_err:
+                    print(f"[Overlay Warning] Could not overlay text: {overlay_err}")
 
-                # Burn viral hook overlay
-                if viral_hook_text:
-                    try:
-                        print(f"[xAI Video] Burning viral hook overlay...")
-                        self.overlay_text_on_video(output_path, viral_hook_text)
-                    except Exception as overlay_err:
-                        print(f"[Overlay Warning] Could not overlay text: {overlay_err}")
-
-                return output_path
-
-            except Exception as e:
-                print(f"[xAI Video] Primary video generation failed: {e}")
-                print("[xAI Video] Falling back to image-based pipeline...")
+            return output_path
 
         # ---- FALLBACK: Generate image first ----
-        print("[FALLBACK] Generating high-fidelity 9:16 portrait image for animation...")
+        print("[FALLBACK] Video generation failed or blocked. Generating high-fidelity 9:16 portrait image for animation...")
         fallback_jpg_path = output_path.replace(".mp4", ".jpg")
         self.generate_image(prompt, output_path=fallback_jpg_path, aspect_ratio="9:16")
 
@@ -140,106 +230,184 @@ class MayaMedia:
 
     def generate_image(self, prompt, output_path="output.jpg", aspect_ratio="1:1"):
         """
-        Generates a high-quality image using the xAI Grok Imagine API.
+        Generates a high-quality image using the best scored available image provider.
         Supports aspect_ratio: "1:1" (square posts) or "9:16" (portrait Reels).
-        Falls back to HF Inference API if xAI key is missing or has no credits.
+        Falls back to HF Inference API if primary keys fail.
         """
         import time
-        print(f"[xAI Image] Generating image | Aspect Ratio: {aspect_ratio}")
-        print(f"[xAI Image] Prompt: {prompt[:100]}...")
+        from governance import BudgetGovernor
+        governor = BudgetGovernor()
 
-        if self.xai_api_key:
-            try:
-                client = self._get_xai_client()
-                print("[xAI Image] Calling grok-imagine-image...")
-                response = client.image.sample(
-                    prompt=prompt,
-                    model="grok-imagine-image",
-                    aspect_ratio=aspect_ratio,
-                    resolution="1k"
-                )
-                # response.image returns raw bytes
-                img = Image.open(io.BytesIO(response.image))
-                img.save(output_path)
-                print(f"[xAI Image] Image saved to {output_path}")
-                return output_path
-
-            except Exception as e:
-                print(f"[xAI Image] Generation failed: {e}")
-                print("[xAI Image] Falling back to Hugging Face...")
-
-        # ---- FALLBACK: Hugging Face Inference API ----
+        xai_key = self.xai_api_key
+        muapi_key = self.muapi_api_key
         hf_key = os.getenv("HF_API_KEY")
-        if hf_key:
-            fallback_models = [
-                "black-forest-labs/FLUX.1-schnell",
-                "stabilityai/stable-diffusion-2-1",
-                "runwayml/stable-diffusion-v1-5"
-            ]
 
-            w = 768 if aspect_ratio == "9:16" else 1024
-            h = 1344 if aspect_ratio == "9:16" else 1024
+        all_image_providers = [
+            {"name": "xai-grok", "endpoint": "grok-imagine-image", "quality": 9.0, "reliability": 9.0, "cost": 0.05, "required_key": xai_key},
+            {"name": "muapi-flux-dev", "endpoint": "/flux-dev", "quality": 9.0, "reliability": 9.0, "cost": 0.03, "required_key": muapi_key},
+            {"name": "muapi-midjourney-v8", "endpoint": "/midjourney-v8", "quality": 9.0, "reliability": 8.5, "cost": 0.05, "required_key": muapi_key},
+            {"name": "muapi-midjourney-v7", "endpoint": "/midjourney-v7", "quality": 8.0, "reliability": 8.0, "cost": 0.04, "required_key": muapi_key},
+            {"name": "muapi-flux-schnell", "endpoint": "/flux-schnell", "quality": 7.5, "reliability": 9.0, "cost": 0.01, "required_key": muapi_key},
+            {"name": "hf-flux-schnell", "endpoint": "black-forest-labs/FLUX.1-schnell", "quality": 7.5, "reliability": 8.5, "cost": 0.00, "required_key": hf_key},
+            {"name": "hf-sd-2.1", "endpoint": "stabilityai/stable-diffusion-2-1", "quality": 6.0, "reliability": 8.0, "cost": 0.00, "required_key": hf_key}
+        ]
 
-            last_error = None
-            for model in fallback_models:
-                print(f"[HF Fallback] Trying model: {model}")
-                url = f"https://router.huggingface.co/hf-inference/models/{model}"
+        # Filter available ones
+        available_providers = [p for p in all_image_providers if p["required_key"]]
 
-                if "flux" in model.lower():
-                    payload = {"inputs": prompt, "parameters": {"width": w, "height": h}}
-                else:
-                    payload = {
-                        "inputs": prompt,
-                        "parameters": {
-                            "negative_prompt": "ugly, blurry, deformed, poorly drawn, AI-perfect, weird hands, extra limbs, cartoon",
-                            "num_inference_steps": 50,
-                            "guidance_scale": 7.5,
-                            "width": w,
-                            "height": h
+        scored_providers = []
+        for p in available_providers:
+            score = (p["quality"] * 0.4) + (p["reliability"] * 0.4) - (p["cost"] * 2.0)
+            scored_providers.append((score, p))
+
+        scored_providers.sort(key=lambda x: x[0], reverse=True)
+
+        print("\n[Provider Selection] Scored available image providers:")
+        for score, p in scored_providers:
+            print(f" - {p['name']} ({p['endpoint']}): Score {score:.2f} (Quality: {p['quality']}, Reliability: {p['reliability']}, Cost: ${p['cost']})")
+
+        generation_success = False
+
+        for score, provider in scored_providers:
+            cost = provider["cost"]
+            name = provider["name"]
+            endpoint = provider["endpoint"]
+
+            # Check budget limit before calling
+            try:
+                governor.check_budget(cost)
+            except Exception as budget_err:
+                print(f"[Budget Block] Skipping {name} (${cost}): {budget_err}")
+                continue
+
+            print(f"\n[Generation] Executing {name} with endpoint {endpoint} (Cost: ${cost})...")
+
+            try:
+                if name == "xai-grok":
+                    client = self._get_xai_client()
+                    response = client.image.sample(
+                        prompt=prompt,
+                        model=endpoint,
+                        aspect_ratio=aspect_ratio,
+                        resolution="1k"
+                    )
+                    img = Image.open(io.BytesIO(response.image))
+                    img.save(output_path)
+                elif name.startswith("muapi-"):
+                    api_url = "https://api.muapi.ai/api/v1"
+                    headers = {"x-api-key": muapi_key, "Content-Type": "application/json"}
+                    payload = {"prompt": prompt, "num_images": 1, "width": 1024, "height": 1024}
+                    if aspect_ratio == "9:16":
+                        payload["width"] = 768
+                        payload["height"] = 1344
+
+                    full_endpoint = f"{api_url}{endpoint}"
+                    submit_res = requests.post(full_endpoint, headers=headers, json=payload, timeout=60)
+                    if submit_res.status_code not in [200, 202]:
+                        raise Exception(f"Submission failed: {submit_res.status_code} - {submit_res.text}")
+
+                    data = submit_res.json()
+                    request_id = data.get("request_id")
+                    if not request_id:
+                        raise Exception("No request_id returned from Muapi.")
+
+                    poll_endpoint = f"{api_url}/predictions/{request_id}/result"
+                    max_attempts = 30
+                    completed = False
+                    for attempt in range(max_attempts):
+                        time.sleep(10)
+                        print(f"[Muapi] Polling... (Attempt {attempt+1}/{max_attempts})")
+                        poll_res = requests.get(poll_endpoint, headers=headers, timeout=30)
+                        if poll_res.status_code != 200:
+                            continue
+                        poll_data = poll_res.json()
+                        status = poll_data.get("status")
+                        if status == "completed":
+                            image_url = poll_data.get("output_url") or poll_data.get("image_url")
+                            if not image_url and poll_data.get("outputs"):
+                                image_url = poll_data.get("outputs")[0]
+                            if image_url:
+                                img_res = requests.get(image_url, timeout=60)
+                                with open(output_path, "wb") as f:
+                                    f.write(img_res.content)
+                                completed = True
+                                break
+                            else:
+                                raise Exception("Job completed but no image URL.")
+                        elif status in ["failed", "error"]:
+                            raise Exception(f"Muapi image generation failed: {poll_data}")
+
+                    if not completed:
+                        raise Exception("Muapi image generation timed out.")
+                else:  # HF
+                    w = 768 if aspect_ratio == "9:16" else 1024
+                    h = 1344 if aspect_ratio == "9:16" else 1024
+                    url = f"https://router.huggingface.co/hf-inference/models/{endpoint}"
+
+                    if "flux" in endpoint.lower():
+                        payload = {"inputs": prompt, "parameters": {"width": w, "height": h}}
+                    else:
+                        payload = {
+                            "inputs": prompt,
+                            "parameters": {
+                                "negative_prompt": "ugly, blurry, deformed, poorly drawn, AI-perfect, weird hands, extra limbs, cartoon",
+                                "num_inference_steps": 50,
+                                "guidance_scale": 7.5,
+                                "width": w,
+                                "height": h
+                            }
                         }
-                    }
 
-                for attempt in range(3):
-                    try:
-                        response = requests.post(url, headers={"Authorization": f"Bearer {hf_key}"}, json=payload, timeout=60)
-                        if response.status_code == 200:
-                            image = Image.open(io.BytesIO(response.content))
-                            image.save(output_path)
-                            print(f"[HF Fallback] Image saved via {model}")
-                            return output_path
-                        elif response.status_code == 503:
-                            print(f"[HF Fallback] Model loading... waiting 20s (attempt {attempt+1}/3)")
-                            time.sleep(20)
-                        else:
-                            print(f"[HF Fallback] {model} returned {response.status_code}")
-                            last_error = Exception(f"{model}: {response.status_code}")
-                            break
-                    except Exception as e:
-                        print(f"[HF Fallback] Error: {e}")
-                        last_error = e
-                        time.sleep(5)
+                    for attempt in range(3):
+                        try:
+                            response = requests.post(url, headers={"Authorization": f"Bearer {hf_key}"}, json=payload, timeout=60)
+                            if response.status_code == 200:
+                                image = Image.open(io.BytesIO(response.content))
+                                image.save(output_path)
+                                print(f"[HF Fallback] Image saved via {endpoint}")
+                                break
+                            elif response.status_code == 503:
+                                print(f"[HF Fallback] Model loading... waiting 20s (attempt {attempt+1}/3)")
+                                time.sleep(20)
+                            else:
+                                print(f"[HF Fallback] {endpoint} returned {response.status_code}")
+                                raise Exception(f"{endpoint}: {response.status_code}")
+                        except Exception as e:
+                            print(f"[HF Fallback] Error: {e}")
+                            if attempt == 2:
+                                raise e
+                            time.sleep(5)
 
-                print(f"[HF Fallback] {model} exhausted, trying next...")
+                print(f"[Generation] Successfully generated image using {name} and saved to {output_path}")
+                governor.record_spend(cost)
+                generation_success = True
+                break
+            except Exception as gen_err:
+                print(f"[Generation Warning] {name} generation failed: {gen_err}")
+                continue
 
         # ---- MOCK (DRY_RUN only) ----
-        if os.getenv("DRY_RUN", "false").lower() == "true":
-            print("\n[DRY_RUN] Creating mock test image...")
-            w = 768 if aspect_ratio == "9:16" else 1024
-            h = 1344 if aspect_ratio == "9:16" else 1024
-            img = Image.new('RGB', (w, h), color=(33, 37, 43))
-            from PIL import ImageDraw
-            draw = ImageDraw.Draw(img)
-            draw.rectangle([(50, 50), (w-50, h-50)], outline=(255, 198, 10), width=4)
-            draw.text(
-                (100, h//2 - 100),
-                f"MAYA AUTOPILOT\n[DRY_RUN ACTIVE]\nAspect: {aspect_ratio}\n\nPrompt Preview:\n{prompt[:80]}...",
-                fill=(255, 255, 255)
-            )
-            img.save(output_path)
-            print(f"[DRY_RUN] Mock image saved to {output_path}")
-            return output_path
+        if not generation_success:
+            if os.getenv("DRY_RUN", "false").lower() == "true":
+                print("\n[DRY_RUN] Creating mock test image...")
+                w = 768 if aspect_ratio == "9:16" else 1024
+                h = 1344 if aspect_ratio == "9:16" else 1024
+                img = Image.new('RGB', (w, h), color=(33, 37, 43))
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(img)
+                draw.rectangle([(50, 50), (w-50, h-50)], outline=(255, 198, 10), width=4)
+                draw.text(
+                    (100, h//2 - 100),
+                    f"MAYA AUTOPILOT\n[DRY_RUN ACTIVE]\nAspect: {aspect_ratio}\n\nPrompt Preview:\n{prompt[:80]}...",
+                    fill=(255, 255, 255)
+                )
+                img.save(output_path)
+                print(f"[DRY_RUN] Mock image saved to {output_path}")
+                return output_path
+            else:
+                raise Exception("Image generation failed. Add XAI_API_KEY with credits, or HF_API_KEY / MUAPI_API_KEY as fallback.")
 
-        raise Exception("Image generation failed. Add XAI_API_KEY with credits, or HF_API_KEY as fallback.")
+        return output_path
 
     # ---------------------------------------------------------------------------
     # MOCK IMAGE (for testing)

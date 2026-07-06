@@ -13,7 +13,8 @@ import {
   Send, 
   RefreshCw, 
   Globe, 
-  Tag 
+  Tag,
+  Coins
 } from "lucide-react";
 
 interface CatalogItem {
@@ -36,6 +37,14 @@ interface LastPost {
   media_url?: string;
 }
 
+interface BudgetState {
+  daily_spend_limit: number;
+  per_action_limit: number;
+  today_spend: number;
+  total_spend: number;
+  last_reset_date: string;
+}
+
 export default function Home() {
   const [status, setStatus] = useState("Offline");
   const [location, setLocation] = useState("Milan");
@@ -44,6 +53,7 @@ export default function Home() {
   const [metadata, setMetadata] = useState("");
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [lastPost, setLastPost] = useState<LastPost | null>(null);
+  const [budget, setBudget] = useState<BudgetState | null>(null);
 
   // Strategy Memory & Analytics States
   const [analyticsBrief, setAnalyticsBrief] = useState("");
@@ -78,6 +88,9 @@ export default function Home() {
           if (data.state?.active_run) {
             setActiveRun(data.state.active_run);
           }
+          if (data.state?.budget) {
+            setBudget(data.state.budget);
+          }
         }
       })
       .catch((err) => {
@@ -110,6 +123,9 @@ export default function Home() {
             setLocation(data.state?.current_location || "Milan");
             if (data.state?.last_post) {
               setLastPost(data.state.last_post);
+            }
+            if (data.state?.budget) {
+              setBudget(data.state.budget);
             }
             if (data.state?.active_run) {
               const run = data.state.active_run;
@@ -302,7 +318,7 @@ export default function Home() {
         </header>
 
         {/* Key States Hub */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
 
           {/* Target Location Card */}
           {/* Interactive Travel Planner Card */}
@@ -371,6 +387,46 @@ export default function Home() {
               <div>
                 <span className="text-neutral-400 text-sm">No post state loaded.</span>
                 <p className="text-xs text-neutral-500 mt-2">Trigger a new photo or reel draft to initialize state.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Budget Governance Card */}
+          <div className="bg-[#14141b]/60 backdrop-blur-xl p-6 rounded-2xl border border-neutral-800/60 shadow-2xl relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-teal-500/5 rounded-full blur-2xl group-hover:bg-teal-500/10 transition duration-500" />
+            <h2 className="text-xs uppercase tracking-widest text-neutral-500 mb-3 flex items-center gap-2 font-mono">
+              <Coins size={14} className="text-teal-400" /> Budget Governance
+            </h2>
+            {budget ? (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-xs font-mono">
+                  <span className="text-neutral-400">Daily Spend:</span>
+                  <span className={`font-bold ${budget.today_spend >= budget.daily_spend_limit ? 'text-red-400' : 'text-emerald-400'}`}>
+                    ${budget.today_spend.toFixed(3)}
+                  </span>
+                </div>
+                
+                {/* Spend progress bar */}
+                <div className="w-full bg-neutral-900 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-500 ${budget.today_spend >= budget.daily_spend_limit ? 'bg-red-500' : 'bg-teal-500'}`}
+                    style={{ width: `${Math.min(100, (budget.today_spend / budget.daily_spend_limit) * 100)}%` }}
+                  />
+                </div>
+
+                <div className="flex justify-between items-center text-[10px] font-mono text-neutral-500 pt-1">
+                  <span>Daily Cap: ${budget.daily_spend_limit.toFixed(2)}</span>
+                  <span>Per-Action: ${budget.per_action_limit.toFixed(2)}</span>
+                </div>
+                
+                <div className="text-[10px] font-mono text-neutral-450 pt-1 border-t border-neutral-900/60 flex justify-between items-center">
+                  <span>Total Spent:</span>
+                  <span className="text-white font-bold">${budget.total_spend.toFixed(2)}</span>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <span className="text-neutral-500 text-xs font-mono">Initializing Budget tracker...</span>
               </div>
             )}
           </div>
