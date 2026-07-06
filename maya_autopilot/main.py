@@ -77,11 +77,21 @@ class MayaAutopilot:
             print("\n[1/4] Brain generating Photo concept...")
             governor = BudgetGovernor()
             governor.check_budget(0.001)  # LLM call budget check
-            post_data = self.brain.generate_post(location=location, post_type=post_type, performance_brief=brief)
+            
+            # Select outfit items dynamically with accessory continuity
+            subtype = "lifestyle" if random.random() < 0.8 else "style_drop"
+            selected_items = self._select_wardrobe(catalog, subtype)
+            selected_products = [item["id"] for item in selected_items]
+            
+            post_data = self.brain.generate_post(
+                location=location, 
+                post_type=post_type, 
+                performance_brief=brief, 
+                selected_items=selected_items, 
+                subtype=subtype
+            )
             governor.record_spend(0.001)  # Record LLM call cost
             
-            subtype = post_data.get("post_subtype", "lifestyle")
-            selected_products = post_data.get("selected_products", [])
             print(f"Prompt Generated: {post_data['image_prompt'][:100]}...")
             print(f"Caption Generated: {post_data['caption'][:50]}...")
 
@@ -119,34 +129,19 @@ class MayaAutopilot:
             # 1. AGENCY: Multi-Agent Storyboarding for Reels
             print("\n[1/4] Agency Ecosystem generating Cinematic Reel Storyboard...")
             
-            # Select outfit items dynamically for the Reel
+            # Select outfit items dynamically with accessory continuity
             subtype = "lifestyle" if random.random() < 0.8 else "style_drop"
-            selected_items = []
+            selected_items = self._select_wardrobe(catalog, subtype)
+            selected_products = [item["id"] for item in selected_items]
+            
             outfit_descriptions = []
-
-            if catalog:
-                if subtype == "style_drop":
-                    outerwear = [item for item in catalog if item["category"] in ["outerwear", "dress"]]
-                    accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
-                    if outerwear:
-                        selected_items.append(random.choice(outerwear))
-                    if accs and random.random() < 0.8:
-                        selected_items.append(random.choice(accs))
-                else:
-                    if random.random() < 0.5:
-                        accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
-                        if accs:
-                            selected_items.append(random.choice(accs))
-
             for item in selected_items:
                 outfit_descriptions.append(f"{item['brand']} {item['name']} ({item['visual_description']})")
-                selected_products.append(item["id"])
 
             outfit_string = ", ".join(outfit_descriptions) if outfit_descriptions else "a modern silent-luxury casual high-fashion outfit curated for the setting"
             
             print(f"[80/20 Engine] Reel Selected Subtype: {subtype.upper()}")
-            if selected_items:
-                print(f"[80/20 Engine] Reel Outfits selected: {selected_products}")
+            print(f"[80/20 Engine] Reel Outfits selected: {selected_products}")
 
             if subtype == "style_drop":
                 concept = f"Luxury Travel & Fashion fusion concept set in {location}, featuring these retail clothes: {outfit_string}. Prompt is styled strictly around these items. Caption contains a high-engagement CTA asking followers to comment 'STYLE' to get the direct outfit details.\n\n[PAST PERFORMANCE BRIEF TO ALIGN WITH]:\n{brief}"
@@ -270,6 +265,62 @@ class MayaAutopilot:
         self._save_state()
 
         print("--- Autopilot Cycle Complete ---\n")
+
+    def _select_wardrobe(self, catalog, subtype):
+        """
+        Selects outfits from catalog with accessory continuity.
+        Accessories are worn 2-3 times in a row before swapping.
+        """
+        import random
+        selected_items = []
+        
+        if not catalog:
+            return []
+
+        # Load previous accessories from state
+        wardrobe_state = self.state.setdefault("active_wardrobe", {
+            "accessories": [],
+            "wear_count": 0
+        })
+        
+        # Determine if we keep previous accessories
+        keep_prev = False
+        prev_accs = wardrobe_state.get("accessories", [])
+        wear_count = wardrobe_state.get("wear_count", 0)
+        
+        # Repeat accessory 2-3 times in a row
+        if prev_accs and wear_count < random.randint(2, 3):
+            keep_prev = True
+            wardrobe_state["wear_count"] = wear_count + 1
+            print(f"[Wardrobe Selector] Repeating accessories {prev_accs} (Wear count: {wardrobe_state['wear_count']})")
+        else:
+            wardrobe_state["wear_count"] = 1
+            wardrobe_state["accessories"] = []
+            
+        # Select outerwear / dress if style_drop
+        if subtype == "style_drop":
+            outerwear = [item for item in catalog if item["category"] in ["outerwear", "dress"]]
+            if outerwear:
+                selected_items.append(random.choice(outerwear))
+        
+        # Select accessories (repeat or select new)
+        if keep_prev:
+            for acc_id in prev_accs:
+                for item in catalog:
+                    if item["id"] == acc_id:
+                        selected_items.append(item)
+        else:
+            accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
+            if accs:
+                new_acc = random.choice(accs)
+                selected_items.append(new_acc)
+                wardrobe_state["accessories"] = [new_acc["id"]]
+                print(f"[Wardrobe Selector] Selected new accessory: {new_acc['id']}")
+                
+        # Save state changes immediately
+        self._save_state()
+        
+        return selected_items
 
     def travel(self):
         """Randomly decides to travel to a new location."""

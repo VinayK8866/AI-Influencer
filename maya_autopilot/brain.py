@@ -42,6 +42,12 @@ class MayaBrain:
         Transparency: Always include #VirtualInfluencer in the hashtag stack.
         CTAs: Every post must have a high-engagement hook (e.g., "Chai or Espresso? Tell me your pick below!").
         Virality: Instagram loves relatable text overlays. We will generate a short, punchy, relatable "Viral Hook" text that will be written ON the video/photo.
+
+        5. Caption Style & Relatable Imperfections:
+        - NEVER write generic, overly polished promotional travel ads (e.g., "I am enjoying the sunny weather at the beach! #summer").
+        - Write like an imperfect human who gets tired, has messy hair, stays in bed too long, or repeated outfits.
+        - Admit flaws or real feelings to invite authentic engagement. Use light self-deprecating humor or conversational filler words ("Honestly", "tbh", "kind of").
+        - Keep the text varied with mixed sentence lengths, natural transitions, and real emotional depth.
         """
 
     def generate_content_with_retry(self, contents):
@@ -114,7 +120,7 @@ class MayaBrain:
                 self.text = "{}"
         return MockResponse("{}")
 
-    def generate_post(self, location="Mumbai", post_type="photo", performance_brief=None):
+    def generate_post(self, location="Mumbai", post_type="photo", performance_brief=None, selected_items=None, subtype=None):
         """
         Generates a post concept, incorporating the 80/20 lifestyle and affiliate catalog matching strategy.
         - 80% Lifestyle: Highly candid luxury street style, no pushy sales CTA. Includes 0-1 subtle accessories.
@@ -134,40 +140,47 @@ class MayaBrain:
             except Exception as e:
                 print(f"[Brain Catalog Warning] Failed to load catalog: {e}")
 
-        # Determine strategy subtype (80% Lifestyle, 20% Style Drop)
-        subtype = "lifestyle" if random.random() < 0.8 else "style_drop"
-        selected_items = []
-        outfit_descriptions = []
+        # If subtype or selected items are not pre-selected, run random selections
+        if subtype is None:
+            subtype = "lifestyle" if random.random() < 0.8 else "style_drop"
 
-        if catalog:
-            if subtype == "style_drop":
-                # Select a major dress or outerwear item, and optionally an accessory/bag
-                outerwear = [item for item in catalog if item["category"] in ["outerwear", "dress"]]
-                accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
-                
-                if outerwear:
-                    selected_items.append(random.choice(outerwear))
-                if accs and random.random() < 0.8:
-                    selected_items.append(random.choice(accs))
-                # Fallback if categories are empty
-                if not selected_items:
-                    selected_items = random.sample(catalog, min(2, len(catalog)))
-            else:
-                # Lifestyle: 50% chance of 1 subtle accessory, otherwise no catalog item (custom styled)
-                if random.random() < 0.5:
+        if selected_items is None:
+            selected_items = []
+            if catalog:
+                if subtype == "style_drop":
+                    # Select a major dress or outerwear item, and optionally an accessory/bag
+                    outerwear = [item for item in catalog if item["category"] in ["outerwear", "dress"]]
                     accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
-                    if accs:
+                    
+                    if outerwear:
+                        selected_items.append(random.choice(outerwear))
+                    if accs and random.random() < 0.8:
                         selected_items.append(random.choice(accs))
+                    # Fallback if categories are empty
+                    if not selected_items:
+                        selected_items = random.sample(catalog, min(2, len(catalog)))
+                else:
+                    # Lifestyle: 50% chance of 1 subtle accessory, otherwise no catalog item (custom styled)
+                    if random.random() < 0.5:
+                        accs = [item for item in catalog if item["category"] in ["accessories", "bag"]]
+                        if accs:
+                            selected_items.append(random.choice(accs))
 
         # Extract descriptions
+        outfit_descriptions = []
         for item in selected_items:
-            outfit_descriptions.append(f"{item['brand']} {item['name']} ({item['visual_description']})")
+            # Handle if dict or object
+            if isinstance(item, dict):
+                outfit_descriptions.append(f"{item['brand']} {item['name']} ({item['visual_description']})")
+            else:
+                outfit_descriptions.append(str(item))
 
         outfit_string = ", ".join(outfit_descriptions) if outfit_descriptions else "a modern silent-luxury casual high-fashion outfit curated for the setting"
 
         print(f"[80/20 Engine] Selected Subtype: {subtype.upper()}")
         if selected_items:
-            print(f"[80/20 Engine] Outfits selected: {[i['id'] for i in selected_items]}")
+            item_ids = [i['id'] if isinstance(i, dict) else str(i) for i in selected_items]
+            print(f"[80/20 Engine] Outfits selected: {item_ids}")
 
         # Construct directive for the LLM based on subtype
         if subtype == "style_drop":
@@ -207,22 +220,54 @@ class MayaBrain:
         response = self.generate_content_with_retry([system_instruction, prompt])
         text = response.text.strip()
 
-        # Clean up if the model includes markdown code block markers
-        if text.startswith("```json"):
-            text = text[7:]
-        if text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-
+        # Robust parsing utility to locate valid JSON objects amidst LLM prefix/suffix garbage
+        import re
+        res_json = None
+        
+        # 1. Try to parse directly
         try:
             res_json = json.loads(text.strip(), strict=False)
+        except Exception:
+            pass
+            
+        # 2. Try to extract from markdown blocks
+        if res_json is None:
+            markdown_blocks = re.findall(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+            if markdown_blocks:
+                for block in markdown_blocks:
+                    try:
+                        res_json = json.loads(block.strip(), strict=False)
+                        break
+                    except Exception:
+                        pass
+                        
+        # 3. Find the first '{' and trace to find the matching '}'
+        if res_json is None:
+            for start_idx in range(len(text)):
+                if text[start_idx] == '{':
+                    balance = 0
+                    for end_idx in range(start_idx, len(text)):
+                        if text[end_idx] == '{':
+                            balance += 1
+                        elif text[end_idx] == '}':
+                            balance -= 1
+                            if balance == 0:
+                                candidate = text[start_idx:end_idx+1]
+                                try:
+                                    res_json = json.loads(candidate, strict=False)
+                                    break
+                                except Exception:
+                                    break # Try next starting '{'
+                    if res_json is not None:
+                        break
+
+        if res_json is not None:
             res_json["post_subtype"] = subtype
-            res_json["selected_products"] = [item["id"] for item in selected_items]
+            res_json["selected_products"] = [item["id"] if isinstance(item, dict) else str(item) for item in selected_items]
             return res_json
-        except json.JSONDecodeError as e:
+        else:
             print(f"Failed to parse JSON. Raw output:\n{text}")
-            raise e
+            raise ValueError("LLM output did not contain a parseable JSON object.")
 
     def verify_image(self, image_path):
         """
